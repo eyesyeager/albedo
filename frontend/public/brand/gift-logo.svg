@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" role="img" aria-labelledby="title">
+  <title id="title">礼遇星球</title>
+  <rect width="32" height="32" rx="8" fill="#E5484D"/>
+  <g fill="none" stroke="#FFFFFF" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M9 14.5h14v9H9zM16 14.5v9M8 14.5h16"/>
+    <path d="M16 14.5c-3.4 0-5.5-1.5-5.5-3.6 0-1.2.9-2.1 2.1-2.1 2.2 0 3.4 2.5 3.4 5.7Zm0 0c3.4 0 5.5-1.5 5.5-3.6 0-1.2-.9-2.1-2.1-2.1-2.2 0-3.4 2.5-3.4 5.7Z"/>
+  </g>
+</svg>

@@ -1,0 +1,92 @@
+# ==========================================================================
+# 测试配置模板（脱敏，提交 Git）
+# 用法：复制为 application.yml 并填入真实凭据（真实文件已被 .gitignore 忽略）
+#   cp src/test/resources/application-test-example.yml src/test/resources/application.yml
+# 说明：
+#  1. 复用真实 MySQL / Redis：本项目没有独立测试库，且租户隔离依赖
+#     Hibernate discriminator + 真实索引，用内存库测不出真实行为。
+#     ⚠️ 写入型测试必须使用测试专用 uid 段并在 @AfterEach 清理。
+#  2. eyes-auth.enabled=false：不装配 PermissionAspect，鉴权由 TestAuthConfig 桩替代
+#     （避免测试依赖 eyesUser Thrift 可用性）。
+#  3. app.cache.env=test：Redis 键前缀与 dev/prod 隔离，测试不污染开发数据。
+# 🔴 键集必须与 application.yml 完全一致；新增/删除键必须同步两份文件。
+# ==========================================================================
+server:
+  port: 0
+
+spring:
+  datasource:
+    url: jdbc:mysql://<MYSQL_HOST>:<MYSQL_PORT>/albedo?useSSL=false&allowPublicKeyRetrieval=true&characterEncoding=UTF-8&connectionCollation=utf8mb4_unicode_ci&connectionTimeZone=UTC&forceConnectionTimeZoneToSession=true
+    username: <MYSQL_USERNAME>
+    password: <MYSQL_PASSWORD>
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    hikari:
+      pool-name: albedo-test-pool
+      maximum-pool-size: 8
+      minimum-idle: 2
+      connection-timeout: 10000
+
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    open-in-view: false
+    properties:
+      hibernate:
+        jdbc:
+          time_zone: UTC
+    show-sql: false
+
+  data:
+    redis:
+      host: <REDIS_HOST>
+      port: 6379
+      password: <REDIS_PASSWORD>
+      database: 0
+      timeout: 3000ms
+
+  jackson:
+    time-zone: UTC
+    default-property-inclusion: non_null
+    serialization:
+      write-dates-as-timestamps: false
+
+  mvc:
+    async:
+      # 🔴 ADR-017 层间不等式：必须 ≥ sys_config chat.generation_deadline_seconds
+      #    + chat.deadline_grace_seconds（共享库默认 300+15=315s），否则 StartupChecker 拒绝启动。
+      #    🔴 它只是传输层硬兜底，测试里的业务收敛由 sys_config 预算 + SysConfigOverride 驱动。
+      request-timeout: 600000
+
+eyes-auth:
+  enabled: false
+  app-id: albedo
+  auth-type: 1
+  thrift:
+    host: <EYES_USER_THRIFT_HOST>
+    port: 9011
+
+app:
+  ai:
+    base-url: https://api.hunyuan.cloud.tencent.com/v1
+    api-key: <AI_API_KEY>
+    default-model: hunyuan-a13b
+    connect-timeout-seconds: 10
+    request-timeout-seconds: 120
+  crypto:
+    secret: <CRYPTO_SECRET_AT_LEAST_32_CHARS>
+  async:
+    core-pool-size: 4
+    max-pool-size: 8
+    queue-capacity: 50
+    keep-alive-seconds: 30
+    thread-name-prefix: ai-stream-test-
+    await-termination-seconds: 5
+  cache:
+    env: test
+  cors:
+    allowed-origin-patterns: []
+
+logging:
+  level:
+    root: warn
+    com.eyes.albedo: info

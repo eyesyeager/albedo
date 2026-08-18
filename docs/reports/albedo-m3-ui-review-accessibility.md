@@ -1,0 +1,87 @@
+- generic [ref=f29e3] [box=0,0,1440,900]:
+  - link "跳到主内容" [ref=f29e4] [cursor=pointer] [box=8,-120,89,37]:
+    - /url: "#main-content"
+  - complementary [ref=f29e5] [box=0,0,280,900]:
+    - generic [ref=f29e6] [box=0,0,279,900]:
+      - link "返回首页" [ref=f29e8] [cursor=pointer] [box=12,6,259,44]:
+        - /url: /
+        - generic [ref=f29e9] [box=16,12,32,32]: 小
+        - generic [ref=f29e11] [box=56,16,186,24]: 小红书文案助手 · Redbook
+      - button "写新笔记" [ref=f29e13] [cursor=pointer] [box=12,64,255,44]
+      - navigation "会话导航" [ref=f29e17] [box=0,120,279,711]:
+        - status [ref=f29e18] [box=8,120,263,181]:
+          - paragraph [ref=f29e22] [box=24,192,231,48]: 暂无笔记草稿，先说说你要写什么主题。
+          - paragraph [ref=f29e23] [box=29,248,221,21]: 开始一次新的对话，记录会出现在这里
+      - button "账号菜单" [ref=f29e26] [cursor=pointer] [box=12,844,255,44]:
+        - generic [ref=f29e27] [box=20,850,32,32]: 视
+        - generic [ref=f29e29] [box=60,859,175,15]: 视觉走查
+  - generic [ref=f29e32] [box=280,0,1160,900]:
+    - banner [ref=f29e33] [box=280,0,1160,50]:
+      - generic [ref=f29e36] [cursor=pointer] [box=296,3,280,44]:
+        - generic [box=330,25,214,0]:
+          - combobox "选择助手" [ref=f29e42] [box=330,13,168,24]
+          - generic [ref=f29e43] [box=330,13,214,24]: 笔记写手
+    - main [ref=f29e48] [box=280,50,1160,850]:
+      - generic [ref=f29e50] [box=500,50,720,800]:
+        - article "我" [ref=f29e51] [box=524,110,672,50]:
+          - generic [ref=f29e52] [box=999,110,197,50]: UI 最终视觉与交互走查
+        - article "助手" [ref=f29e53] [box=524,188,672,639]:
+          - generic [ref=f29e54] [box=524,188,672,639]:
+            - generic [ref=f29e56] [box=524,188,672,610]:
+              - group "工具调用" [ref=f29e57] [box=524,188,672,46]:
+                - generic [ref=f29e58] [box=525,189,670,44]:
+                  - generic [ref=f29e62] [box=561,201,423,21]: review:pending:very-long-tool-key-for-responsive-check
+                  - generic [ref=f29e63] [box=992,201,39,21]: 排队中
+                  - button "展开或收起工具调用摘要" [ref=f29e64] [cursor=pointer] [box=1147,189,44,44]
+              - group "需要你确认后才会执行 高风险" [ref=f29e67] [box=524,238,672,260]:
+                - paragraph [ref=f29e68] [box=541,255,638,24]:
+                  - generic [ref=f29e71] [box=565,255,150,24]: 需要你确认后才会执行
+                  - generic [ref=f29e72] [box=723,257,52,19]: 高风险
+                - paragraph [ref=f29e73] [box=541,287,638,21]: review:awaiting_confirmation:very-long-tool-key-for-responsive-check
+                - generic [ref=f29e74] [box=541,316,638,42]:
+                  - generic [ref=f29e75] [box=541,316,638,21]: 将要使用的信息
+                  - generic [ref=f29e76] [box=541,337,638,21]: account=***1234; token=***; remark=long sanitized summary for wrapping
+                - generic [ref=f29e77] [box=541,369,638,27]: 剩余 0 秒可决定
+                - generic [ref=f29e80] [box=541,408,638,44]:
+                  - button "拒绝" [disabled] [ref=f29e81] [box=1013,408,64,44]
+                  - button "允许执行" [disabled] [ref=f29e83] [box=1085,408,94,44]
+                - paragraph [ref=f29e85] [box=541,460,638,21]: 确认时间已结束，正在同步结果
+              - group "工具调用" [ref=f29e86] [box=524,502,672,46]:
+                - generic [ref=f29e87] [box=525,503,670,44]:
+                  - generic [ref=f29e90] [box=561,515,423,21]: review:running:very-long-tool-key-for-responsive-check
+                  - generic [ref=f29e91] [box=992,515,39,21]: 执行中
+                  - button "展开或收起工具调用摘要" [ref=f29e92] [cursor=pointer] [box=1147,503,44,44]
+              - group "工具调用" [ref=f29e95] [box=524,552,672,46]:
+                - generic [ref=f29e96] [box=525,553,670,44]:
+                  - generic [ref=f29e100] [box=561,565,438,21]: review:succeeded:very-long-tool-key-for-responsive-check
+                  - generic [ref=f29e101] [box=1007,565,39,21]: 已完成
+                  - button "展开或收起工具调用摘要" [ref=f29e102] [cursor=pointer] [box=1147,553,44,44]
+              - group "工具调用" [ref=f29e105] [box=524,602,672,46]:
+                - generic [ref=f29e106] [box=525,603,670,44]:
+                  - generic [ref=f29e111] [box=561,615,415,21]: review:failed:very-long-tool-key-for-responsive-check
+                  - generic [ref=f29e112] [box=984,615,52,21]: 执行失败
+                  - button "展开或收起工具调用摘要" [ref=f29e113] [cursor=pointer] [box=1147,603,44,44]
+              - group "工具调用" [ref=f29e116] [box=524,652,672,46]:
+                - generic [ref=f29e117] [box=525,653,670,44]:
+                  - generic [ref=f29e122] [box=561,665,438,21]: review:timed_out:very-long-tool-key-for-responsive-check
+                  - generic [ref=f29e123] [box=1007,665,39,21]: 已超时
+                  - button "展开或收起工具调用摘要" [ref=f29e124] [cursor=pointer] [box=1147,653,44,44]
+              - group "工具调用" [ref=f29e127] [box=524,702,672,46]:
+                - generic [ref=f29e128] [box=525,703,670,44]:
+                  - generic [ref=f29e132] [box=561,715,438,21]: review:cancelled:very-long-tool-key-for-responsive-check
+                  - generic [ref=f29e133] [box=1007,715,39,21]: 已取消
+              - group "工具调用" [ref=f29e134] [box=524,752,672,46]:
+                - generic [ref=f29e135] [box=525,753,670,44]:
+                  - generic [ref=f29e140] [box=561,765,375,21]: review:denied:very-long-tool-key-for-responsive-check
+                  - generic [ref=f29e141] [box=944,765,39,21]: 已拒绝
+                  - generic [ref=f29e142] [box=991,765,200,21]: 这次没有获得执行许可，操作未被执行
+            - paragraph [ref=f29e143] [box=524,806,672,21]: 正在生成…
+        - status [ref=f29e146] [box=523,826,1,1]: 确认时间即将结束
+      - generic [ref=f29e147] [box=280,755,1160,145]:
+        - form "消息输入框" [ref=f29e148] [box=500,763,720,96]:
+          - generic [ref=f29e150] [box=500,763,720,68]:
+            - textbox "消息输入框" [ref=f29e151] [box=517,772,642,50]:
+              - /placeholder: 例如：帮我写一篇城市周末咖啡探店笔记，风格轻松
+            - button "发送" [disabled] [ref=f29e153] [box=1167,774,44,44]
+          - paragraph [ref=f29e156] [box=500,835,720,24]
+        - generic [ref=f29e157] [box=500,859,720,29]: Redbook 助手 · AI 生成内容仅供参考，发布前请人工复核。

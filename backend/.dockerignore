@@ -1,0 +1,10 @@
+# 构建上下文是 backend/ 目录；只放行源码与构建产物，剔除无关文件
+.git/
+.mvn/
+*.log
+target/maven-status/
+target/surefire-reports/
+target/failsafe-reports/
+target/test-classes/
+target/classes/
+target/generated-sources/

@@ -1,0 +1,52 @@
+/* ==========================================================================
+ * 全局样式入口
+ *
+ * 顺序要求：tokens.css 必须在 Tailwind 与 Element Plus 之后加载覆盖变量，
+ * 但由于 tokens 只声明自定义属性、不产生具体规则，这里按 tokens → tailwind 顺序引入即可。
+ *
+ * 🔴 纪律：本文件与任何 .vue 中，颜色 / 间距 / 圆角 / 阴影 / 动效时长
+ *    一律使用 tokens.css 的语义变量，禁止硬编码魔法值。
+ * ========================================================================== */
+@import './tokens.css';
+@import './derived.css';
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html,
+  body,
+  #app {
+    height: 100%;
+  }
+
+  body {
+    margin: 0;
+    background-color: var(--color-bg-base);
+    color: var(--color-text-primary);
+    font-family: var(--font-family-body);
+    font-size: var(--font-size-body);
+    line-height: var(--line-height-base);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  /* 键盘可达：焦点环使用 Token，避免各处自定义 */
+  :focus-visible {
+    outline: 2px solid var(--color-border-focus);
+    outline-offset: 2px;
+  }
+}
+
+/* 可访问性：尊重系统"减少动态效果"偏好（@UI 动画规范强制项） */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

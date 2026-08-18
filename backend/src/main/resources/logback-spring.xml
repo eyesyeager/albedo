@@ -1,0 +1,102 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Albedo 后端日志配置（logback-spring.xml）
+
+  设计目标：
+  ① 控制台：彩色、单行、人类可读，面向本地开发实时观察；
+  ② 本地文件：落盘到 ${LOG_PATH:-./logs}/albedo/，按「天 + 大小」滚动，
+     带行号/线程/MDC(tenantId/uid/requestId)，供事后排查；
+  ③ 全量 DEBUG 级别文件（albedo-debug.log）：捕获最细粒度日志；
+  ④ 所有 appender 写入同一目录，可通过启动参数 -DLOG_PATH=/abs/path 覆盖落盘位置。
+
+  ⚠️ 本项目已统一使用 SLF4J + Lombok @Slf4j，无需改动任何业务代码即可获得文件日志。
+  调试时临时调高某包级别：在 application.yml 加 logging.level.com.eyes.albedo.xxx=DEBUG。
+-->
+<configuration scan="true" scanPeriod="60 seconds">
+
+    <!-- 可通过 -DLOG_PATH 或环境变量 LOG_PATH 覆盖；默认 ./logs -->
+    <property name="LOG_PATH" value="${LOG_PATH:-./logs}"/>
+    <property name="LOG_DIR" value="${LOG_PATH}/albedo"/>
+    <property name="APP_NAME" value="albedo"/>
+
+    <!-- 控制台彩色pattern（单行；使用 logback 内置 %highlight 与 %ex，避免依赖 Spring 专属扩展） -->
+    <property name="CONSOLE_PATTERN" value="%d{yyyy-MM-dd HH:mm:ss.SSS} %highlight(%-5level) [%X{requestId:-'-'}][%X{tenantId:-'-'}][%X{uid:-'-'}] %15.15t %-40.40logger{39} %M %m%n%ex"/>
+
+    <!-- 文件pattern（含行号，便于定位） -->
+    <property name="FILE_PATTERN" value="%d{yyyy-MM-dd HH:mm:ss.SSS} %5p [%X{requestId:-'-'}][%X{tenantId:-'-'}][%X{uid:-'-'}] %15.15t %-40.40logger{39} %M:%L %m%n"/>
+
+    <appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
+        <encoder>
+            <pattern>${CONSOLE_PATTERN}</pattern>
+            <charset>UTF-8</charset>
+        </encoder>
+    </appender>
+
+    <!-- 主业务日志：INFO 及以上，按天+100MB滚动，保留 30 天 -->
+    <appender name="FILE_APP" class="ch.qos.logback.core.rolling.RollingFileAppender">
+        <file>${LOG_DIR}/${APP_NAME}.log</file>
+        <encoder>
+            <pattern>${FILE_PATTERN}</pattern>
+            <charset>UTF-8</charset>
+        </encoder>
+        <rollingPolicy class="ch.qos.logback.core.rolling.SizeAndTimeBasedRollingPolicy">
+            <fileNamePattern>${LOG_DIR}/${APP_NAME}.%d{yyyy-MM-dd}.%i.log</fileNamePattern>
+            <maxFileSize>100MB</maxFileSize>
+            <maxHistory>30</maxHistory>
+            <totalSizeCap>5GB</totalSizeCap>
+        </rollingPolicy>
+    </appender>
+
+    <!-- 全量调试日志：DEBUG 及以上（业务代码多为 INFO/DEBUG），独立文件，便于深挖 -->
+    <appender name="FILE_DEBUG" class="ch.qos.logback.core.rolling.RollingFileAppender">
+        <file>${LOG_DIR}/${APP_NAME}-debug.log</file>
+        <encoder>
+            <pattern>${FILE_PATTERN}</pattern>
+            <charset>UTF-8</charset>
+        </encoder>
+        <rollingPolicy class="ch.qos.logback.core.rolling.SizeAndTimeBasedRollingPolicy">
+            <fileNamePattern>${LOG_DIR}/${APP_NAME}-debug.%d{yyyy-MM-dd}.%i.log</fileNamePattern>
+            <maxFileSize>100MB</maxFileSize>
+            <maxHistory>14</maxHistory>
+            <totalSizeCap>10GB</totalSizeCap>
+        </rollingPolicy>
+        <filter class="ch.qos.logback.classic.filter.LevelFilter">
+            <level>DEBUG</level>
+            <onMatch>ACCEPT</onMatch>
+            <onMismatch>NEUTRAL</onMismatch>
+        </filter>
+    </appender>
+
+    <!-- 错误日志独立归档，快速定位异常 -->
+    <appender name="FILE_ERROR" class="ch.qos.logback.core.rolling.RollingFileAppender">
+        <file>${LOG_DIR}/${APP_NAME}-error.log</file>
+        <encoder>
+            <pattern>${FILE_PATTERN}</pattern>
+            <charset>UTF-8</charset>
+        </encoder>
+        <rollingPolicy class="ch.qos.logback.core.rolling.SizeAndTimeBasedRollingPolicy">
+            <fileNamePattern>${LOG_DIR}/${APP_NAME}-error.%d{yyyy-MM-dd}.%i.log</fileNamePattern>
+            <maxFileSize>50MB</maxFileSize>
+            <maxHistory>60</maxHistory>
+        </rollingPolicy>
+        <filter class="ch.qos.logback.classic.filter.ThresholdFilter">
+            <level>ERROR</level>
+        </filter>
+    </appender>
+
+    <!-- 根日志：控制台 + 三个文件；默认级别 INFO -->
+    <root level="INFO">
+        <appender-ref ref="CONSOLE"/>
+        <appender-ref ref="FILE_APP"/>
+        <appender-ref ref="FILE_DEBUG"/>
+        <appender-ref ref="FILE_ERROR"/>
+    </root>
+
+    <!-- 第三方框架降噪，避免淹没业务日志 -->
+    <logger name="org.springframework" level="INFO"/>
+    <logger name="org.hibernate" level="WARN"/>
+    <logger name="com.zaxxer.hikari" level="INFO"/>
+    <logger name="io.netty" level="WARN"/>
+    <logger name="com.eyes.eyesAuth" level="INFO"/>
+
+</configuration>

@@ -1,0 +1,66 @@
+/* ==========================================================================
+ * 派生布局变量（Derived Tokens）
+ *
+ * 存在理由：design-system.md 规定了若干**组件级尺寸**（44px 触控目标、480px 状态页、
+ * 320px 抽屉、720/640px 阅读与气泡宽度、28px 消息组间距…），但 `tokens.css` 目前
+ * 未收录它们。为了让 `.vue` 中**不出现任何裸 px 魔法值**，这里统一以 tokens.css
+ * 的语义变量做 `calc()` 推导，组件只消费本文件的语义名。
+ *
+ * 🔴 纪律：
+ *   1. 本文件**只允许** calc() / min() 组合 tokens.css 变量，不得出现新的绝对色值/字号
+ *   2. 少量视口比例（88vw / 85%）来自 design-system.md 的明文规定，已逐条注明出处
+ *   3. ⚠️ 已向 @UI 发起请求：把下列派生量正式纳入 tokens.css，届时本文件整体替换
+ * ========================================================================== */
+
+:root {
+  /* 触控目标 44px（design-system §6.1）：24 + 12 + 8 */
+  --control-touch-size: calc(var(--spacing-lg) + var(--spacing-md) + var(--spacing-sm));
+  /* 紧凑控件 / 代码块顶栏 36px（design-system §6.2、§6.7）：24 + 12 */
+  --control-compact-size: calc(var(--spacing-lg) + var(--spacing-md));
+  /* 头像与 Logo 32px（design-system §6.9 行内视觉） */
+  --avatar-size: var(--spacing-xl);
+
+  /* Composer 增长上限 ≈200px 后内部滚动（design-system §6.3）：16 × 1.6 × 8 */
+  --composer-max-height: calc(var(--font-size-body) * var(--line-height-base) * 8);
+
+  /* 站点状态页内容宽度 480px（design-system §6.12）：720 − 192 − 48 */
+  --status-panel-max-width: calc(
+    var(--layout-content-max-width) - var(--spacing-3xl) * 3 - var(--spacing-2xl)
+  );
+
+  /* 移动 / 平板抽屉宽度 min(88vw, 320px)（design-system §6.5）：280 + 32 + 8 */
+  --drawer-width: min(88vw, calc(var(--layout-sidebar-width) + var(--spacing-xl) + var(--spacing-sm)));
+
+  /* 用户气泡最大宽度 min(85%, 640px)（design-system §6.6）：720 − 64 − 16 */
+  --bubble-user-max-width: min(
+    85%,
+    calc(var(--layout-content-max-width) - var(--spacing-3xl) - var(--spacing-base))
+  );
+
+  /* 下拉菜单最大宽度 360px（design-system §6.4）：280 + 64 + 16 */
+  --dropdown-max-width: calc(var(--layout-sidebar-width) + var(--spacing-3xl) + var(--spacing-base));
+
+  /* 消息组间距：同角色 16px，跨角色 28px（design-system §6.6）：24 + 4 */
+  --message-gap-same-role: var(--spacing-base);
+  --message-gap-cross-role: calc(var(--spacing-lg) + var(--spacing-xs));
+
+  /* 移动端吸底安全区 */
+  --safe-area-bottom: env(safe-area-inset-bottom, 0px);
+
+  /* 确认倒计时轨道 2px（design-system §14.3.2）：4 ÷ 2 */
+  --countdown-track-height: calc(var(--spacing-xs) / 2);
+  /* 工具状态条图标列宽 16px（design-system §14.2.1）：8 × 2 */
+  --tool-icon-size: calc(var(--spacing-sm) * 2);
+  /*
+   * 一秒（1000ms）：功能性 loading 旋转周期与倒计时逐秒插值（design-system §14.7 明文规定）。
+   * tokens.css 的动效 Token 最大为 --duration-page(360ms)，无法 calc 出规范值，
+   * 故按本文件既有惯例注明出处后收录；⚠️ 已向 @UI 申请纳入 tokens.css。
+   */
+  --duration-second: 1000ms;
+  /*
+   * Reduced Motion 上限（100ms）：design-system §14.7 规定"≤100ms 交叉淡化"。
+   * tokens.css 最小动效 Token 为 --duration-instant(120ms) 已超过该上限且无法 calc 得到，
+   * 故按本文件惯例注明出处后收录；⚠️ 已向 @UI 申请纳入 tokens.css。
+   */
+  --duration-reduced: 100ms;
+}

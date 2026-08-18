@@ -1,0 +1,45 @@
+{
+  "name": "albedo-frontend",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "description": "Albedo 多租户 AI 问答系统 · 前端（静态可部署）",
+  "scripts": {
+    "dev": "vite",
+    "build": "vue-tsc --noEmit -p tsconfig.app.json && vite build",
+    "preview": "vite preview",
+    "typecheck": "vue-tsc --noEmit -p tsconfig.app.json",
+    "test:unit": "vitest run",
+    "test:unit:watch": "vitest",
+    "test:e2e": "playwright test"
+  },
+  "dependencies": {
+    "dompurify": "^3.1.7",
+    "element-plus": "^2.8.6",
+    "lucide-vue-next": "^0.454.0",
+    "markdown-it": "^14.1.0",
+    "pinia": "^2.2.4",
+    "vue": "^3.5.12",
+    "vue-router": "^4.4.5"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.48.2",
+    "@types/markdown-it": "^14.1.2",
+    "@types/node": "^22.8.6",
+    "@vitejs/plugin-vue": "^5.1.4",
+    "@vue/test-utils": "^2.4.6",
+    "autoprefixer": "^10.4.20",
+    "jsdom": "^25.0.1",
+    "postcss": "^8.5.1",
+    "tailwind-merge": "^2.5.5",
+    "tailwindcss": "3.4.17",
+    "tailwindcss-animate": "^1.0.7",
+    "typescript": "^5.6.3",
+    "vite": "^5.4.12",
+    "vitest": "^2.1.4",
+    "vue-tsc": "^2.1.10"
+  },
+  "engines": {
+    "node": ">=20.19.0"
+  }
+}
