@@ -343,7 +343,7 @@ onBeforeUnmount(clearRecoveredTimer)
 .quota-panel {
   display: flex;
   flex-direction: column;
-  gap: var(--spacing-xs);
+  gap: 2px;
   grid-area: 1 / 1;
   min-width: 0;
   /* 🔴 所有状态同 padding + 同 1px 边框：几何恒定，切换只换颜色与 opacity */
@@ -351,6 +351,8 @@ onBeforeUnmount(clearRecoveredTimer)
   border: 1px solid transparent;
   border-radius: var(--radius-sm);
   font-size: var(--font-size-footnote);
+  /* 🔴 收紧行高让状态轨在窄屏不挤占对话空间（保留剩余/已用/重置语义不变）。 */
+  line-height: 1.45;
   transition:
     opacity var(--duration-instant) var(--ease-enter),
     background-color var(--duration-instant) var(--ease-enter),
@@ -439,6 +441,32 @@ onBeforeUnmount(clearRecoveredTimer)
     align-items: baseline;
     justify-content: space-between;
     gap: var(--spacing-md);
+  }
+}
+
+/*
+ * 移动端优先 (<768px)：状态轨紧凑化。
+ *  - line-height 已收紧；这里叠加更紧的 panel gap 与更小外 margin，
+ *    让"剩余/已用/重置"三段信息在 375px 上更短一行；
+ *  - 语义、文案、aria-describedby、可访问文本 一律不变，仅排版压缩。
+ */
+@media (max-width: 767.98px) {
+  .quota-rail {
+    margin-top: 2px;
+  }
+
+  .quota-panel {
+    /* 内 padding 减半，但保留左右 padding，避免文字紧贴边框 */
+    padding: 2px var(--spacing-sm);
+  }
+
+  .quota-line {
+    gap: 2px;
+  }
+
+  .quota-line--meta {
+    /* 元信息行不再额外字号放大，保持与主信息同一节奏 */
+    font-size: var(--font-size-footnote);
   }
 }
 

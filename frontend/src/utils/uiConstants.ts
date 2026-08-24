@@ -59,13 +59,14 @@ export const ICON_SIZE_INLINE = 16
 export const COMPOSER_STOP_BUTTON_ID = 'composer-stop-button'
 
 /**
- * 额度「偏低」的展示比例阈值（design-system §15.1.1，建议值 0.2）。
+ * 剩余次数提醒的展示阈值（design-system §15.1.1）。
  *
  * 🔴 这是**展示层常量**，不是业务额度阈值：
- *   它只表达"剩余不足总量五分之一时升级视觉"，
+ *   它只表达"剩余次数不足 10 时才展示额度状态轨提醒，充足时整条状态轨不挂载"，
  *   🔴 不进 Store / API、不改变后端准入、🔴 更不得写死平台默认日限额（50）本身。
+ *   绝对次数（而非比例）保证不同租户限额下"何时提醒用户"的心智一致。
  */
-export const QUOTA_LOW_RATIO = 0.2
+export const QUOTA_REMIND_THRESHOLD = 10
 
 /** 平板及以上断点（design-system §15.6：≥768px 状态轨一行两区并可显示 IANA 名称）。 */
 export const TABLET_MEDIA_QUERY = '(min-width: 768px)'

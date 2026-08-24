@@ -42,4 +42,16 @@ const html = computed(() => renderInlineMarkdown(props.text))
   color: var(--color-text-link);
   text-decoration: underline;
 }
+
+/*
+ * 移动端：与 dock 共享同一视觉层级，垂直间距再做压缩；
+ * 文本保持 13px footnote（依设计系统 §6.11），不缩小字号，仅压 padding。
+ */
+@media (max-width: 767.98px) {
+  .footer-disclaimer {
+    padding-top: var(--spacing-xs);
+    /* 安全区已经在 dock 底部承载，footer 不再重复添加 */
+    padding-bottom: 0;
+  }
+}
 </style>

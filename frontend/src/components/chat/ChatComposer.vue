@@ -307,10 +307,16 @@ defineExpose({ clear, focus })
   display: flex;
   align-items: center;
   gap: var(--spacing-xs);
-  min-height: var(--spacing-lg);
+  /* 🔴 移动端优先：默认 0 高度、不抢纵长空间；
+     只有真正承载内容（错误 / 长度计数 / 禁用原因）时才增长。 */
+  min-height: 0;
   margin: var(--spacing-xs) 0 0;
   color: var(--color-text-tertiary);
   font-size: var(--font-size-footnote);
+}
+
+.composer-note:empty {
+  display: none;
 }
 
 .composer-note--danger {

@@ -49,8 +49,9 @@
 /**
  * 消息流（design-system.md §10.2）。
  *
- * 滚动策略：仅当用户"接近底部"时跟随新内容；用户向上阅读后显示"回到最新"，
- * 🔴 不强制拉回底部、🔴 流式更新不抢焦点。
+ * 滚动策略：模型生成期间（思考过程 + 正文流式输出）**始终跟随底部**，
+ * 确保用户实时看到思考与正文内容；用户向上阅读历史时显示"回到最新"，
+ * 生成结束后尊重阅读位置、🔴 不强制拉回底部。
  */
 import { AlertCircle, ArrowDown } from 'lucide-vue-next'
 import { computed, nextTick, onMounted, ref, watch } from 'vue'
@@ -80,7 +81,13 @@ const emit = defineEmits<{ retry: [clientId: string]; reload: [] }>()
 const scroller = ref<HTMLElement | null>(null)
 const nearBottom = ref(true)
 
-const showJumpToLatest = computed(() => !nearBottom.value && props.messages.length > 0)
+/**
+ * 🔴 生成期间强制贴底：即使"回到最新"按钮被用户滚动顶上去，也不显示，
+ * 因为流式输出会自动跟随到底部，按钮已无意义。
+ */
+const showJumpToLatest = computed(
+  () => !nearBottom.value && !props.generating && props.messages.length > 0,
+)
 
 /** 是否存在待确认的工具调用：用户不在底部时不强制滚动，只增强"回到最新"的语义 */
 const hasPendingConfirm = computed(() =>
@@ -102,9 +109,22 @@ const liveStatus = computed(() =>
       : '',
 )
 
-/** 内容总长度：流式期间随分片增长，用它作为"是否需要跟随滚动"的触发源 */
+/**
+ * 内容总长度：流式期间随分片增长，用它作为"是否需要跟随滚动"的触发源。
+ *
+ * 🔴 必须同时统计思考过程与正文：思考阶段（`delta.reasoning` 累积）时 `content` 尚未增长，
+ * 只算 `content` 会让思考流式输出期间 watch 不触发、底部不跟随 —— 用户看不到实时思考。
+ * 正文与 `segments[].text` 是同一内容的不同投影，取 `content`（权威）即可，避免重复计数。
+ */
 const contentLength = computed(() =>
-  props.messages.reduce((sum, message) => sum + message.content.length, 0),
+  props.messages.reduce(
+    (sum, message) =>
+      sum +
+      message.content.length +
+      message.reasoning.length +
+      message.segments.reduce((acc, segment) => acc + segment.reasoning.length, 0),
+    0,
+  ),
 )
 
 function isCrossRole(index: number): boolean {
@@ -134,11 +154,23 @@ function scrollToBottom(smooth = false): void {
 watch(
   () => [props.messages.length, contentLength.value],
   async () => {
-    if (!nearBottom.value) {
+    // 生成期间始终跟随底部，实时呈现思考过程与正文；否则仅当用户已在底部时跟随
+    if (!props.generating && !nearBottom.value) {
       return
     }
     await nextTick()
     scrollToBottom()
+  },
+)
+
+// 生成开始（如用户从底部点发送）→ 主动贴底；生成结束 → 若用户仍在底部则归位
+watch(
+  () => props.generating,
+  async () => {
+    if (props.generating || nearBottom.value) {
+      await nextTick()
+      scrollToBottom()
+    }
   },
 )
 

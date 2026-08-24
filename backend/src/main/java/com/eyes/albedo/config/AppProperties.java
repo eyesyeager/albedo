@@ -19,6 +19,9 @@ public class AppProperties {
     /** AI 上游（OpenAI 兼容接口）连接参数。 */
     private final Ai ai = new Ai();
 
+    /** 腾讯云联网搜索（WSA SearchPro）连接与凭据参数。 */
+    private final TencentWsa tencentWsa = new TencentWsa();
+
     /** 凭据加密参数（M2 MCP 凭据 AES-256-GCM）。 */
     private final Crypto crypto = new Crypto();
 
@@ -44,6 +47,19 @@ public class AppProperties {
         private int connectTimeoutSeconds = 10;
         /** 整体请求超时（秒），实际以 Agent 的 requestTimeoutSeconds 为准，本值为上限兜底。 */
         private int requestTimeoutSeconds = 300;
+    }
+
+    @Getter
+    @Setter
+    public static class TencentWsa {
+        /** 腾讯云联网搜索接口域名（固定白名单端点，不参与 SSRF 动态解析）。 */
+        private String host = "wsa.tencentcloudapi.com";
+        /** 腾讯云 API 版本（SearchPro 固定版本）。 */
+        private String version = "2025-05-08";
+        /** 腾讯云 SecretId（凭据类，仅写 application.yml，不入库）。 */
+        private String secretId;
+        /** 腾讯云 SecretKey（凭据类，仅写 application.yml，不入库）。 */
+        private String secretKey;
     }
 
     @Getter

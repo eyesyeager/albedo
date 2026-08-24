@@ -17,7 +17,7 @@ import {
 } from '@/utils/quotaSnapshot'
 import { formatTenantClock, tenantDayRelation } from '@/utils/quotaTime'
 import { ApiError, NetworkError } from '@/utils/request'
-import { QUOTA_LOW_RATIO, QUOTA_RAIL_ID } from '@/utils/uiConstants'
+import { QUOTA_RAIL_ID, QUOTA_REMIND_THRESHOLD } from '@/utils/uiConstants'
 
 import { jsonResponse, setupPinia, stubLocation } from './helpers'
 
@@ -157,14 +157,21 @@ describe('resolveQuotaDisplayState · 四态判定优先级', () => {
     expect(resolveQuotaDisplayState({ phase: 'loading', snapshot: null }, 30)).toBe('rateLimited')
   })
 
-  it('偏低只由 remaining/limit 与展示常量决定（🔴 不出现代码默认 50）', () => {
-    const low = Math.floor(50 * QUOTA_LOW_RATIO)
-
-    expect(resolveQuotaDisplayState(readyView({ remaining: low }), 0)).toBe('low')
-    expect(resolveQuotaDisplayState(readyView({ remaining: low + 1 }), 0)).toBe('normal')
-    // 小总量同样成立：比例判定与总量无关
-    expect(resolveQuotaDisplayState(readyView({ limit: 5, remaining: 1, used: 4 }), 0)).toBe('lastOne')
-    expect(resolveQuotaDisplayState(readyView({ limit: 5, remaining: 3, used: 2 }), 0)).toBe('normal')
+  it('🔴 剩余次数提醒只由绝对阈值决定：remaining < 10 才展示，与总量无关', () => {
+    // remaining=9 → low（提醒）；remaining=10 → hidden（充足，不展示）
+    expect(resolveQuotaDisplayState(readyView({ remaining: 9, used: 41 }), 0)).toBe('low')
+    expect(resolveQuotaDisplayState(readyView({ remaining: 10, used: 40 }), 0)).toBe('hidden')
+    // 大总量同样成立：绝对阈值与 limit 无关
+    expect(
+      resolveQuotaDisplayState(readyView({ limit: 100, remaining: 9, used: 91 }), 0),
+    ).toBe('low')
+    expect(
+      resolveQuotaDisplayState(readyView({ limit: 100, remaining: 10, used: 90 }), 0),
+    ).toBe('hidden')
+    // remaining=1 → lastOne（阈值内最高提醒等级）
+    expect(resolveQuotaDisplayState(readyView({ remaining: 1, used: 49 }), 0)).toBe('lastOne')
+    // 阈值常量本身必须是 10（🔴 不出现代码默认 50 或比例推断）
+    expect(QUOTA_REMIND_THRESHOLD).toBe(10)
   })
 
   it('unlimited / loading / unavailable 各自成态', () => {
@@ -458,21 +465,29 @@ describe('QuotaStatusRail · 四态渲染与布局稳定', () => {
     expect(wrapper.find('.quota-panel').exists()).toBe(false)
   })
 
-  it('正常态展示剩余、已用/总量与租户时区重置时刻', () => {
-    const wrapper = mountRail(readyView())
+  it('剩余次数偏低（<10）展示剩余、已用/总量与租户时区重置时刻', () => {
+    const wrapper = mountRail(readyView({ remaining: 9, used: 41 }))
 
     const active = wrapper.find('.quota-panel.is-active')
     expect(active.classes()).toContain('quota-panel--count')
-    expect(active.text()).toContain(zhCN.chat.quota.remaining.replace('{remaining}', '38'))
-    expect(active.text()).toContain('已用 12/50')
+    expect(active.text()).toContain(zhCN.chat.quota.remaining.replace('{remaining}', '9'))
+    expect(active.text()).toContain('已用 41/50')
     // 明日 00:00（租户时区）重置 —— 时刻按 Asia/Shanghai 渲染
     expect(active.text()).toContain('明日 00:00')
     expect(active.text()).toContain(zhCN.chat.quota.tenantTimezone)
   })
 
+  it('🔴 剩余充足（≥10）时不挂载状态轨（释放底部对话空间）', () => {
+    const wrapper = mountRail(readyView({ remaining: 38 }))
+
+    expect(wrapper.find('.quota-rail').exists()).toBe(false)
+    expect(wrapper.find('.quota-panel').exists()).toBe(false)
+    expect(wrapper.text()).toBe('')
+  })
+
   it('🔴 四套模板恒在 DOM 中且恒只有一个激活（Composer 不跳动）', () => {
     const states: readonly QuotaView[] = [
-      readyView(),
+      readyView({ remaining: 9, used: 41 }),
       readyView({ remaining: 1, used: 49 }),
       readyView({ used: 50, remaining: 0, status: 'exhausted' }),
       { phase: 'loading', snapshot: null },
@@ -530,7 +545,7 @@ describe('QuotaStatusRail · 四态渲染与布局稳定', () => {
   })
 
   it('QPM 结束播报一次“可以继续发送”，🔴 绝不自动重发', async () => {
-    const wrapper = mountRail(readyView(), 1)
+    const wrapper = mountRail(readyView({ remaining: 9, used: 41 }), 1)
 
     await wrapper.setProps({ rateLimitRemaining: 0 })
 
@@ -567,7 +582,7 @@ describe('QuotaStatusRail · 四态渲染与布局稳定', () => {
   })
 
   it('🔴 播报节点为 role=status + polite + atomic，且不是 Dialog / alert', () => {
-    const wrapper = mountRail(readyView())
+    const wrapper = mountRail(readyView({ remaining: 9, used: 41 }))
 
     const live = wrapper.find('[role="status"]')
     expect(live.attributes('aria-live')).toBe('polite')
@@ -582,18 +597,18 @@ describe('QuotaStatusRail · 四态渲染与布局稳定', () => {
   })
 
   it('初次加载不主动播报；额度真实变化才 polite 一次，且可访问描述含真实 IANA 名称', async () => {
-    const wrapper = mountRail(readyView())
+    const wrapper = mountRail(readyView({ remaining: 9, used: 41 }))
     expect(wrapper.find('[role="status"]').text()).toBe('')
 
-    await wrapper.setProps({ quota: readyView({ used: 13, remaining: 37 }) })
+    await wrapper.setProps({ quota: readyView({ used: 42, remaining: 8 }) })
 
     const announced = wrapper.find('[role="status"]').text()
-    expect(announced).toContain('37')
+    expect(announced).toContain('8')
     expect(announced).toContain('Asia/Shanghai')
 
     // 同 status + remaining 再次刷新（仅 asOf 变化）不重复播报
     await wrapper.setProps({
-      quota: readyView({ used: 13, remaining: 37, asOf: '2026-08-14T03:30:00.000Z' }),
+      quota: readyView({ used: 42, remaining: 8, asOf: '2026-08-14T03:30:00.000Z' }),
     })
     expect(wrapper.find('[role="status"]').text()).toBe(announced)
   })
@@ -601,15 +616,15 @@ describe('QuotaStatusRail · 四态渲染与布局稳定', () => {
   it('从用尽恢复时播报“已恢复”（发送恢复但不自动聚焦、不自动发送）', async () => {
     const wrapper = mountRail(readyView({ used: 50, remaining: 0, status: 'exhausted' }))
 
-    await wrapper.setProps({ quota: readyView({ used: 0, remaining: 50 }) })
+    await wrapper.setProps({ quota: readyView({ used: 45, remaining: 5 }) })
 
     expect(wrapper.find('[role="status"]').text()).toBe(
-      zhCN.chat.quota.restored.replace('{remaining}', '50'),
+      zhCN.chat.quota.restored.replace('{remaining}', '5'),
     )
   })
 
   it('🔴 时区非法时省略重置段，不回落浏览器时区', () => {
-    const wrapper = mountRail(readyView({ timezone: 'Asia/Atlantis' }))
+    const wrapper = mountRail(readyView({ remaining: 9, used: 12, timezone: 'Asia/Atlantis' }))
 
     const active = wrapper.find('.quota-panel.is-active')
     expect(active.text()).toContain('已用 12/50')

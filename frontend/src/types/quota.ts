@@ -67,8 +67,9 @@ export interface QuotaView {
  * 状态轨展示态（design-system.md §15.1.1 / §15.3 / §15.3.1）。
  *
  * 🔴 判定优先级（不可调整）：
- *   hidden → exhausted → rateLimited → unlimited → loading / unavailable → lastOne → low → normal
+ *   hidden（匿名）→ exhausted → rateLimited → unlimited → loading / unavailable → lastOne → low → hidden（额度充足）
  * 🔴 `exhausted` 高于 `rateLimited`：日额度用尽时不得启动或保留 QPM 秒级倒计时。
+ * 🔴 `normal` 仅在边缘 case（remaining/limit 为 null 或 limit ≤ 0）出现；额度充足（remaining ≥ 10）直接返回 `hidden` 不展示。
  */
 export type QuotaDisplayState =
   | 'hidden'

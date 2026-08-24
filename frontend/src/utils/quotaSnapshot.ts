@@ -16,7 +16,7 @@ import {
   type QuotaView,
 } from '@/types/quota'
 import { ApiError } from '@/utils/request'
-import { QUOTA_LOW_RATIO } from '@/utils/uiConstants'
+import { QUOTA_REMIND_THRESHOLD } from '@/utils/uiConstants'
 
 const QUOTA_STATUSES: readonly QuotaStatus[] = ['available', 'exhausted', 'unlimited']
 
@@ -97,8 +97,10 @@ export function isQuotaExhausted(snapshot: QuotaSnapshot | null): boolean {
 /**
  * 计算状态轨展示态（design-system.md §15.1.1）。
  *
- * 🔴 优先级：hidden → exhausted → rateLimited → unlimited → loading/unavailable → lastOne → low → normal
- * 🔴 不写死平台默认 50 或任何租户限额：偏低只由 `remaining / limit` 与展示常量决定。
+ * 🔴 优先级：hidden → exhausted → rateLimited → unlimited → loading/unavailable → lastOne → low → hidden（充足）
+ * 🔴 不写死平台默认 50 或任何租户限额：是否提醒只由 `remaining` 与绝对阈值 `QUOTA_REMIND_THRESHOLD` 决定。
+ * 🔴 剩余充足（remaining ≥ 10）返回 `hidden`：整条额度状态轨不挂载，释放底部对话空间；
+ *    `hidden` 在此不再专指"匿名"，而是"无需展示额度提醒"（匿名仍由 `view.phase === 'hidden'` 提前返回）。
  *
  * @param view 额度视图（阶段 + 快照）
  * @param rateLimitRemaining QPM 剩余等待秒数（只来自服务端 `retryAfterSeconds`）
@@ -131,7 +133,11 @@ export function resolveQuotaDisplayState(
   if (remaining === 1) {
     return 'lastOne'
   }
-  return remaining / limit <= QUOTA_LOW_RATIO ? 'low' : 'normal'
+  if (remaining < QUOTA_REMIND_THRESHOLD) {
+    return 'low'
+  }
+  // 🔴 剩余充足（≥ 10）：不展示剩余次数提醒，整条状态轨不挂载，释放底部对话空间
+  return 'hidden'
 }
 
 function deriveStatus(enabled: boolean, remaining: number | null): QuotaStatus {

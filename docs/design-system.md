@@ -928,16 +928,15 @@ a11y.toolCallSummaryToggle / toolConfirmCard
 前端只根据权威快照计算展示等级，不本地推断能否发送，不写死平台默认 `50` 或任何租户限额：
 
 ```text
-ratio = limit > 0 ? remaining / limit : 0
-
 若 status=exhausted 或 remaining=0       → 日额度用尽
 否则若服务端 10005 倒计时仍有效          → QPM 限流中
 否则若 remaining=1                      → 额度偏低 · 仅剩一次子态
-否则若 ratio <= QUOTA_LOW_RATIO         → 额度偏低
-否则                                    → 正常
+否则若 remaining < QUOTA_REMIND_THRESHOLD → 额度偏低
+否则                                    → 额度充足（不展示提醒，整条状态轨不挂载）
 ```
 
-- `QUOTA_LOW_RATIO` 是**展示层命名常量**，建议值 `0.2`；集中放入前端 UI 常量模块，不散落在组件，不进入 Store/API，也不改变后端准入。它表达“剩余不足总量五分之一时升级视觉”，不是业务额度阈值。
+- `QUOTA_REMIND_THRESHOLD` 是**展示层命名常量**，值 `10`；集中放入前端 UI 常量模块，不散落在组件，不进入 Store/API，也不改变后端准入。它表达“剩余次数不足 10 次时才展示额度状态轨提醒，充足时不挂载、释放底部对话空间”，不是业务额度阈值。
+- **绝对阈值而非比例**：不同租户限额下“何时提醒用户”的心智一致（例如 limit=100 时 remaining=15 依然充足、不提醒），避免比例判定随 limit 漂移。
 - `remaining=1` 是整数额度的最后一个正值，用于把文案改为“仅剩 1 次”；它不假设总量、不改变可发送性。
 - 日额度用尽优先级高于 QPM；已用尽时不得启动或保留 QPM 秒级倒计时。QPM 阈值不在接口中，UI 不展示“每分钟限 N 次”或任何策略数字。
 
@@ -958,10 +957,11 @@ ratio = limit > 0 ? remaining / limit : 0
 
 **不跳动规则：**
 
-- 已登录且需要展示额度时，状态轨使用单格 CSS Grid；正常、偏低、QPM、用尽以及加载/失败模板占同一 `grid-area`。非激活模板 `visibility:hidden + opacity:0 + pointer-events:none + aria-hidden=true`，仍参与网格最大尺寸计算；激活模板原位交叉淡化。禁止用状态切换反复 `display:none` 造成 Composer 高度改变。
+- 已登录且需要展示额度时，状态轨使用单格 CSS Grid；偏低、QPM、用尽以及加载/失败模板占同一 `grid-area`。非激活模板 `visibility:hidden + opacity:0 + pointer-events:none + aria-hidden=true`，仍参与网格最大尺寸计算；激活模板原位交叉淡化。禁止用状态切换反复 `display:none` 造成 Composer 高度改变。
 - 发送/停止按钮继续占同一 44px 操作位；额度变化不得改变输入面的 x/y、发送按钮尺寸或消息列表底部预留。
 - 375px 下状态轨按最坏两行信息预留；≥768px 为一行。200% 缩放时允许容器自然增高，不截断必要文案，但同一缩放级别内各状态仍由网格最大模板统一高度。
 - **匿名用户不挂载整个额度状态轨**：不请求、不显示、不保留空白、不显示骨架。登录完成后再挂载并加载当前租户额度。
+- **额度充足（remaining ≥ 10）同样不挂载状态轨**：与匿名同理由（无需要提醒的信息），整条状态轨隐藏以释放底部对话空间；由 `resolveQuotaDisplayState` 返回 `hidden` 实现，与匿名共用同一挂载开关。
 
 样式层建议（仅示意，不要求本轮创建文件）：
 
@@ -994,12 +994,12 @@ ratio = limit > 0 ? remaining / limit : 0
 
 | 状态 | 可见文案与语气 | 颜色与容器（仅现有 Token） | 图标 | 布局空间 | 动效 |
 |---|---|---|---|---|---|
-| **正常：额度充足** | `今日剩余 {remaining} 次 · 已用 {used}/{limit} · {resetLabel}（租户时区）重置`。客观、短句、不提醒消费焦虑 | 透明背景；剩余用 `--color-text-secondary`，其余用 `--color-text-tertiary`；不用品牌色、成功色或边框 | 无。正常状态不额外制造视觉噪声 | 占用固定状态轨；与其他状态共享尺寸 | 首次加载直接出现；数值权威更新时仅文字 opacity 交叉 `--duration-instant`，无位移 |
+| **额度充足（remaining ≥ 10）** | 🔴 不展示：整条状态轨不挂载，释放底部对话空间 | 无 | 无 | 不占用布局 | 无 |
 | **额度偏低** | 普通偏低：`今日剩余 {remaining} 次`；仅剩一次：`今日仅剩 1 次`。后接已用/总量与重置时间，不使用“马上用完”等焦虑措辞 | 图标与主信息使用 `--color-warning`；元信息仍为 secondary/tertiary。普通偏低透明；仅剩一次增加 `--color-bg-subtle` + `1px solid var(--color-warning)`，圆角 `--radius-sm` | 普通偏低 `Gauge`；仅剩一次 `TriangleAlert`，均为 Lucide 16px | 占用同一状态轨，不增高 Composer | normal→low/last 原位颜色与 opacity 过渡，`--duration-fast`；不脉冲、不闪烁、不缩放 |
 | **QPM 限流中（10005）** | 主句：`发送太频繁，{remainingSeconds} 秒后可继续`；副信息保留当前每日 `剩余 {remaining} · 已用 {used}/{limit} · {resetLabel} 重置`。语气是“短暂等待、自动恢复”，不得出现 QPM 阈值或“每分钟限 N 次” | `--color-rate-limit-surface` 背景 + `--color-rate-limit-border` 描边；Clock 与倒计时数字用 `--color-warning`，其余文字用 primary/secondary；不用 danger | `Clock3` 16px；图标不旋转 | 完整替换状态轨的主内容，但轨道尺寸不变；发送临时禁用，输入仍可编辑 | 状态进入/恢复只做原位 opacity 交叉；可见数字每秒直接更新，不做跳动动画；倒计时结束显示一次“现在可以继续发送”后淡出，绝不自动重发 |
 | **日额度用尽（30070）** | `今日额度已用完 · 已用 {used}/{limit}`；`{resetLabel}（租户时区）重置。如需提高额度，请联系租户管理员`。语气明确、持久、无秒级等待暗示 | **不使用 `--color-danger`，也不使用 `--color-brand`**。采用 `--color-bg-subtle`、`--color-border-strong`、`--color-text-primary/secondary`；主句 Semibold。发送按钮改中性禁用态 | `CalendarX2` 16px；与 QPM 的 Clock、偏低的 Gauge/TriangleAlert 形成形状差异 | 占用同一状态轨；移动端最多两行可见文本，不弹 Toast/Dialog，不移入浮层 | 进入时原位 opacity 交叉 `--duration-instant`；无摇晃、脉冲、进度动画；持续显示至权威快照恢复 |
 
-状态不只靠颜色区分：正常无图标且语气中性；偏低有 Gauge/TriangleAlert + “剩余”；QPM 有 Clock + 秒级倒计时 + 自动恢复；日额度用尽有 CalendarX2 + 绝对重置时刻 + 持久禁用。这四套图标、措辞、恢复模型与容器强度不可互换。
+状态不只靠颜色区分：额度充足不展示（无图标、无语气）；偏低有 Gauge/TriangleAlert + “剩余”；QPM 有 Clock + 秒级倒计时 + 自动恢复；日额度用尽有 CalendarX2 + 绝对重置时刻 + 持久禁用。这几套图标、措辞、恢复模型与容器强度不可互换。
 
 #### 15.3.1 契约已有的补充状态
 
@@ -1149,7 +1149,7 @@ errors.rateLimited.description / recovered（沿用既有 key，按本章语气�
 ### 15.11 实现后验收清单
 
 - [ ] 首页与会话详情使用同一额度组件；匿名态无请求、无组件、无占位、无骨架。
-- [ ] 正常/偏低/仅剩一次只由 `remaining/limit` 计算展示等级，不出现代码默认 50；QPM UI 不出现任何阈值。
+- [ ] 额度充足（remaining ≥ 10）不挂载状态轨；偏低/仅剩一次只由 `remaining` 与绝对阈值 `QUOTA_REMIND_THRESHOLD`（10）判定，不出现代码默认 50 或比例推断；QPM UI 不出现任何阈值。
 - [ ] `10005` 只出现秒级等待与恢复；`30070` 只出现租户时区重置与持久禁用，两者无共用提示皮肤。
 - [ ] `resetsAt` 在 `Asia/Shanghai`、`America/New_York` 及 DST 边界均按响应 timezone 格式化；改变浏览器时区不改变同租户显示。
 - [ ] 用尽后输入、选区、复制和草稿仍可用；发送与 Enter 禁用；停止生成不受影响。

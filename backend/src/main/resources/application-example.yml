@@ -97,9 +97,9 @@ eyes-auth:
 
 app:
   ai:
-    base-url: https://api.hunyuan.cloud.tencent.com/v1
+    base-url: https://tokenhub.tencentmaas.com/v1
     api-key: <AI_API_KEY>
-    default-model: hunyuan-a13b
+    default-model: deepseek-v4-flash
     connect-timeout-seconds: 10
     request-timeout-seconds: 300
   crypto:

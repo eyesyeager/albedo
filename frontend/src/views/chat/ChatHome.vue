@@ -276,7 +276,7 @@ watch(
 
 .dock {
   flex: 0 0 auto;
-  padding: var(--spacing-sm) var(--spacing-base) calc(var(--spacing-md) + var(--safe-area-bottom));
+  padding: var(--spacing-xs) var(--spacing-base) calc(var(--spacing-sm) + var(--safe-area-bottom));
   background-color: var(--color-bg-base);
 }
 
@@ -286,8 +286,19 @@ watch(
   }
 
   .dock {
-    padding-left: var(--spacing-lg);
-    padding-right: var(--spacing-lg);
+    padding: var(--spacing-sm) var(--spacing-lg) calc(var(--spacing-md) + var(--safe-area-bottom));
+  }
+}
+
+/*
+ * 移动端：让 dock 与上方消息流融为一体，去掉 composer-shell 的外边框和
+ * 自身背景视觉，使其更像"消息气泡之下"自然延伸 —— 既压缩纵向空间，
+ * 又避免底部出现一块硬边界割裂。
+ */
+@media (max-width: 767.98px) {
+  .dock {
+    padding-top: 0;
+    padding-bottom: var(--safe-area-bottom);
   }
 }
 </style>
