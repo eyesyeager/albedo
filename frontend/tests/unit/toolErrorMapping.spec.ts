@@ -68,7 +68,6 @@ function toolCall(overrides: Partial<ToolCallSummary> = {}): ToolCallSummary {
     toolType: 'mcp',
     toolKey: 'weather:query',
     status: 'failed',
-    riskLevel: 'low',
     round: 1,
     summary: '',
     argsSummary: '',
@@ -81,38 +80,28 @@ function toolCall(overrides: Partial<ToolCallSummary> = {}): ToolCallSummary {
 }
 
 describe('toolErrorDescriptionKey · 工具状态条内的错误说明', () => {
-  it('🔴 timed_out + 30050 = 确认等待超时（语义等同拒绝、未执行）', () => {
-    const key = toolErrorDescriptionKey('timed_out', ERROR_CODE.TOOL_DENIED)
-
-    expect(key).toBe('errors.toolDenied.confirmTimeout')
-    expect(t(key)).toBe(zhCN.errors.toolDenied.confirmTimeout)
-  })
-
-  it('🔴 timed_out + 30051 = 执行超时，与确认超时文案不同且不暗示已成功', () => {
-    const confirmTimeout = t(toolErrorDescriptionKey('timed_out', ERROR_CODE.TOOL_DENIED))
+  it('🔴 timed_out + 30051 = 执行超时，不暗示已成功', () => {
     const execTimeout = t(toolErrorDescriptionKey('timed_out', ERROR_CODE.TOOL_TIMEOUT))
 
     expect(toolErrorDescriptionKey('timed_out', ERROR_CODE.TOOL_TIMEOUT)).toBe(
       'errors.toolTimeout.description',
     )
-    expect(execTimeout).not.toBe(confirmTimeout)
     expect(execTimeout).not.toContain('成功')
     expect(execTimeout).not.toContain('已完成')
   })
 
-  it('🔴 30056（结果未知）既不等于确认超时，也不等于执行超时，且禁止暗示成功', () => {
+  it('🔴 30056（结果未知）不等于执行超时，且禁止暗示成功', () => {
     const retryBlocked = t(toolErrorDescriptionKey('timed_out', ERROR_CODE.TOOL_RETRY_BLOCKED))
 
     expect(toolErrorDescriptionKey('failed', ERROR_CODE.TOOL_RETRY_BLOCKED)).toBe(
       'errors.toolRetryBlocked.description',
     )
     expect(retryBlocked).toBe(zhCN.errors.toolRetryBlocked.description)
-    expect(retryBlocked).not.toBe(t('errors.toolDenied.confirmTimeout'))
     expect(retryBlocked).not.toBe(t('errors.toolTimeout.description'))
     expect(retryBlocked).not.toContain('成功')
   })
 
-  it('denied + 30050 使用普通拒绝文案（不是确认超时文案）', () => {
+  it('denied + 30050 使用普通拒绝文案', () => {
     expect(toolErrorDescriptionKey('denied', ERROR_CODE.TOOL_DENIED)).toBe(
       'errors.toolDenied.description',
     )
@@ -131,10 +120,9 @@ describe('toolErrorDescriptionKey · 工具状态条内的错误说明', () => {
     expect(toolErrorDescriptionKey('failed', 39999)).toBe('')
   })
 
-  it('全部 8 种状态在 errorCode=null 时都不产生错误说明', () => {
+  it('全部 7 种状态在 errorCode=null 时都不产生错误说明', () => {
     const statuses: readonly ToolCallStatusValue[] = [
       'pending',
-      'awaiting_confirmation',
       'running',
       'succeeded',
       'failed',

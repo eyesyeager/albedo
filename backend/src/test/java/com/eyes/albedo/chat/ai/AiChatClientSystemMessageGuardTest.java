@@ -110,7 +110,7 @@ class AiChatClientSystemMessageGuardTest {
                 List.of(ToolDefinition.of(ToolDefinition.TYPE_LOCAL, "calculator", "calculator",
                         "四则运算", "{\"type\":\"object\",\"properties\":{\"expression\":"
                                 + "{\"type\":\"string\"}},\"required\":[\"expression\"]}",
-                        "digest", "low", false, true, 5, null, null)));
+                        "digest", true, 5, null, null)));
 
         JsonNode body = objectMapper.readTree(client.buildBody(request));
 

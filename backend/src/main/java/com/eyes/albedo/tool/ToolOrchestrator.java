@@ -2,12 +2,9 @@ package com.eyes.albedo.tool;
 
 import java.util.List;
 import java.util.Optional;
-import java.util.function.LongSupplier;
 
-import com.eyes.albedo.audit.AuditActions;
 import com.eyes.albedo.audit.AuditContext;
 import com.eyes.albedo.audit.AuditEvent;
-import com.eyes.albedo.audit.AuditResults;
 import com.eyes.albedo.audit.AuditWriteException;
 import com.eyes.albedo.common.BusinessException;
 import com.eyes.albedo.common.ErrorCode;
@@ -31,18 +28,17 @@ import org.springframework.stereotype.Service;
  * ② 绑定 / 授权            → 30050 + 审计 tool.grant_denied（与状态流转同事务）
  * ③ SSRF 运行时兜底        → 30050 + 审计 mcp.ssrf_rejected（🔴 在 pending 阶段，否则状态机不允许 denied）
  * ④ JSON Schema 校验       → 30053，🔴 不发起任何执行
- * ⑤ 风险 × toolPolicy 判定 → 需确认则进入 ToolConfirmRegistry 等待
- * ⑥ 🔴 执行前授权点查      → 置 running **之前**再查一次（V1.1.4 #4；≤1 次、禁缓存）
- * ⑦ 轮次上限               → 由 chat/ChatStreamRunner 持有（它才知道"本次生成"的边界）
+ * ⑤ 🔴 执行前授权点查      → 置 running **之前**再查一次（V1.1.4 #4；≤1 次、禁缓存）
+ * ⑥ 轮次上限               → 由 chat/ChatStreamRunner 持有（它才知道"本次生成"的边界）
  * </pre>
  *
- * <p>🔴 <b>⑥ 为什么不能省（V1.1.4 #4 裁决：订正实现缺口，非新增要求）</b>：
+ * <p>🔴 <b>⑤ 为什么不能省（V1.1.4 #4 裁决：订正实现缺口，非新增要求）</b>：
  * ② 发生在<b>清单构造时</b>，而清单构造 → 工具执行之间横跨整轮生成
- * （含确认等待最长 120s + 最多 {@code tool.max_rounds} 轮），最坏数分钟。
+ * （最多 {@code tool.max_rounds} 轮），最坏数分钟。
  * 只信清单 = "DBA 撤授权后工具仍可被执行数分钟"，直接违反明文 AC-MCP-004。
  * 实现见 {@link ToolGrantPointCheck}（残余窗口 = 单次执行时长，已登记 AR-017）。
  *
- * <p>🔴 <b>⑥ 的复查范围（api-spec V1.1.5 G-2 裁决框 / AR-019 追认现状，注释即契约）</b>：
+ * <p>🔴 <b>⑤ 的复查范围（api-spec V1.1.5 G-2 裁决框 / AR-019 追认现状，注释即契约）</b>：
  * <pre>
  * ✅ 复查（授权列 / 启用列，共 4 列）：
  *      · mcp_tools.granted        / tenant_tool_grants.granted   —— 授权位
@@ -65,11 +61,11 @@ import org.springframework.stereotype.Service;
  *
  * <p>🔴 <b>三段式事务纪律（ADR-010，最高危）</b>：
  * <pre>
- * ① 短事务：pending / awaiting_confirmation / running 各自提交
- * ② 🔴 事务外：确认等待（最长 120s）与工具执行（网络调用）
+ * ① 短事务：pending / running 各自提交
+ * ② 🔴 事务外：工具执行（网络调用）
  * ③ 短事务：终态 + 审计同事务提交
  * 🔴 本类整体**无 @Transactional**，且不注入任何 Repository ——
- *    从依赖层面杜绝"等待期间持有 tool_calls 行锁"，那会与 confirm 的 FOR UPDATE 互等死锁，
+ *    从依赖层面杜绝"执行期间持有 tool_calls 行锁"，
  *    且低并发单测测不出来（由 TransactionDisciplineScanTest 静态守护）。
  *    🔴 执行前授权点查同样<b>不直接注入 Repository</b>，而是委托 {@link ToolGrantPointCheck}
  *    （它是无事务的单条 count 查询），保持本类"零 Repository"的结构性保证。
@@ -102,14 +98,7 @@ public class ToolOrchestrator {
      * @param catalog        本次生成构造的工具清单（🔴 模型可见范围的唯一来源）
      * @param auditContext   审计上下文（由 Servlet 线程抓取后显式传入）
      * @param listener       状态流转回调（由 chat 翻译成 SSE {@code tool} 帧）
-     * @param cancellation   取消信号（停止生成 / 会话删除 / 断连）
-     * @param usableSeconds  🔴 <b>本次生成剩余可用预算</b>（{@code remaining − grace}，秒；
-     *                       ADR-017 ③ⓑ）。由 {@code chat} 侧的 {@code GenerationDeadline} 供给，
-     *                       🔴 用 {@link LongSupplier} 而不是把 deadline 对象传进来 ——
-     *                       {@code tool} 包<b>不得依赖</b> {@code chat}（§5.1.3 防成环）。
-     *                       🔴 允许为 {@code null}（无 deadline 场景，如单测）：
-     *                       此时确认等待退回 {@code tool.confirm_wait_seconds} 绝对上限
-     * @param agentVersionId 🔴 本次改造新增：本次生成绑定的 Agent 版本 ID，透传给
+     * @param agentVersionId 🔴 本次生成绑定的 Agent 版本 ID，透传给
      *                       {@code ToolExecutionRequest} → {@code LocalToolInvocation}，
      *                       供 {@code skill_load} 回查绑定的 Skill（其余工具不使用）
      */
@@ -120,25 +109,13 @@ public class ToolOrchestrator {
                                  List<ToolDefinition> catalog,
                                  AuditContext auditContext,
                                  ToolProgressListener listener,
-                                 ToolCancellation cancellation,
-                                 LongSupplier usableSeconds,
                                  long agentVersionId) {
 
         /** 兼容构造（🔴 {@code agentVersionId} 缺省为 {@code 0}，供既有调用方/单测使用）。 */
         public ToolRunContext(String tenantId, long uid, long conversationId, long messageId,
                               List<ToolDefinition> catalog, AuditContext auditContext,
-                              ToolProgressListener listener, ToolCancellation cancellation,
-                              LongSupplier usableSeconds) {
-            this(tenantId, uid, conversationId, messageId, catalog, auditContext, listener,
-                    cancellation, usableSeconds, 0L);
-        }
-
-        /** 无 deadline 供给的兼容构造（🔴 仅限没有生成预算概念的调用方 / 单测）。 */
-        public ToolRunContext(String tenantId, long uid, long conversationId, long messageId,
-                              List<ToolDefinition> catalog, AuditContext auditContext,
-                              ToolProgressListener listener, ToolCancellation cancellation) {
-            this(tenantId, uid, conversationId, messageId, catalog, auditContext, listener,
-                    cancellation, null, 0L);
+                              ToolProgressListener listener) {
+            this(tenantId, uid, conversationId, messageId, catalog, auditContext, listener, 0L);
         }
     }
 
@@ -188,7 +165,6 @@ public class ToolOrchestrator {
     private final ToolArgsValidator argsValidator;
     private final ToolExecutorRegistry executorRegistry;
     private final ToolCallRecorder recorder;
-    private final ToolConfirmRegistry confirmRegistry;
     private final ToolSummaryScrubber scrubber;
     private final ToolResultTruncator truncator;
 
@@ -198,7 +174,6 @@ public class ToolOrchestrator {
                            ToolArgsValidator argsValidator,
                            ToolExecutorRegistry executorRegistry,
                            ToolCallRecorder recorder,
-                           ToolConfirmRegistry confirmRegistry,
                            ToolSummaryScrubber scrubber,
                            ToolResultTruncator truncator) {
         this.catalogService = catalogService;
@@ -207,7 +182,6 @@ public class ToolOrchestrator {
         this.argsValidator = argsValidator;
         this.executorRegistry = executorRegistry;
         this.recorder = recorder;
-        this.confirmRegistry = confirmRegistry;
         this.scrubber = scrubber;
         this.truncator = truncator;
     }
@@ -262,30 +236,16 @@ public class ToolOrchestrator {
                     feedback(e.getCode(), e.getMessage()), null);
         }
 
-        // ⑤ 风险判定与确认等待
-        boolean runningAlreadySet = false;
-        if (definition.requiresConfirmation()) {
-            ToolDispatch decided = awaitConfirmation(ctx, definition, call, invocation, argsSummary);
-            if (decided != null) {
-                return decided;
-            }
-            // 🔴 ALLOW 路径：状态已由 confirm 接口在行锁内推进为 running
-            runningAlreadySet = true;
-        }
-
-        // ⑥ 🔴 执行前授权点查（api-spec §7.6.3 契约表，V1.1.4 #4；范围见类注释「⑥ 的复查范围」）：
-        //    置 running **之前**（确认路径下则是"已 running 的竞态分支"）再查一次，
-        //    ≤1 次查询、禁缓存 —— 把"撤授权生效点"从"下一次生成"压到"下一次执行"。
+        // ⑤ 🔴 执行前授权点查（api-spec §7.6.3 契约表，V1.1.4 #4；范围见类注释「⑤ 的复查范围」）：
+        //    置 running **之前**再查一次，≤1 次查询、禁缓存 ——
+        //    把"撤授权生效点"从"下一次生成"压到"下一次执行"。
         //    🔴 复查范围仅授权/启用列（granted、status、mcp_servers.status/deleted_at）；
         //    🔴 **不含** agent_capability_bindings（绑定 = 生成期快照，AR-019），禁止改写为复查绑定。
         if (!grantPointCheck.stillGranted(ctx.tenantId(), definition)) {
-            return denyRevokedBeforeExecution(ctx, definition, call, invocation, argsSummary,
-                    runningAlreadySet);
+            return denyRevokedBeforeExecution(ctx, definition, call, invocation, argsSummary);
         }
 
-        if (!runningAlreadySet) {
-            recorder.markRunning(call.getId(), argsSummary);
-        }
+        recorder.markRunning(call.getId(), argsSummary);
         emit(ctx, definition, call, ToolCall.STATUS_RUNNING, invocation.round(), argsSummary, "",
                 false, null);
 
@@ -343,12 +303,7 @@ public class ToolOrchestrator {
     /**
      * 🔴 <b>执行前授权点查未通过</b>（api-spec §7.6.3 契约表「失败处置」行，V1.1.4 #4）。
      *
-     * <pre>
-     * 时点二分（两条路径的对外表现完全一致：errorCode 恒 30050 + tool.grant_denied 审计）：
-     *   · 未确认路径：行仍是 pending → **pending → denied**
-     *   · 确认通过路径：行已由 confirm 接口置为 running → **running → denied**
-     *     （§7.8.1 ③ 已把该迁移登记为合法，故此处不需要任何特殊处理）
-     * </pre>
+     * <p>🔴 行仍是 pending → **pending → denied**，errorCode 恒 30050 + tool.grant_denied 审计。
      *
      * <p>🔴 审计与状态流转在<b>同一个独立短事务</b>内提交（ADR-010 / §7.14 第三行）：
      * 事件由 {@link ToolAuthorizationService#grantDeniedEvent} <b>只构造不写入</b>，
@@ -360,111 +315,15 @@ public class ToolOrchestrator {
      */
     private ToolDispatch denyRevokedBeforeExecution(ToolRunContext ctx, ToolDefinition definition,
                                                     ToolCall call, ToolInvocation invocation,
-                                                    String argsSummary, boolean running) {
+                                                    String argsSummary) {
         log.warn("[SECURITY] 执行前授权点查判定拒绝（撤授权 / 停用即刻生效）："
-                        + "toolType={} toolKey={} round={} from={} → denied + 30050",
-                definition.toolType(), definition.toolKey(), invocation.round(),
-                running ? ToolCall.STATUS_RUNNING : ToolCall.STATUS_PENDING);
+                        + "toolType={} toolKey={} round={} → denied + 30050",
+                definition.toolType(), definition.toolKey(), invocation.round());
         AuditEvent audit = authorizationService.grantDeniedEvent(ctx.tenantId(),
                 definition.toolKey());
         return terminal(ctx, definition, call, invocation.round(), argsSummary,
                 ToolCall.STATUS_DENIED, ErrorCode.TOOL_DENIED,
                 DENIED_FEEDBACK, null, audit);
-    }
-
-    /**
-     * 高风险确认等待（🔴 事务外等待，ADR-008）。
-     *
-     * <p>🔴 <b>V1.4.2（ADR-017 ③ⓑ）确认等待被生成预算收紧</b>：
-     * <pre>
-     * 本次实际等待上限 = min(sys_config: tool.confirm_wait_seconds, remaining − grace)
-     * </pre>
-     * ⓐ 🔴 该值<b>必须下发前端</b>（{@code tool.confirmExpiresInSeconds}，api-spec §5.2）——
-     *    否则倒计时会<b>骗人</b>（显示 120s 而 30s 后即 {@code timed_out}）；
-     * ⓑ 🔴 {@code remaining − grace ≤ 0} → <b>根本不发确认卡</b>：不落
-     *    {@code awaiting_confirmation}、不下发该帧，直接以既有 TIMEOUT 分支收敛
-     *    （{@code timed_out} + {@code 30050} + {@code tool.confirm_timeout} 审计，
-     *    🔴 零新增状态 / 零新增错误码 / 零新增 audit action）。
-     *
-     * <p>🔴 <b>为什么"不发一张必然超时的确认卡"</b>：那张卡片对用户是纯粹的误导
-     * （点下去也来不及执行），且会把本已耗尽的预算再消耗一次心跳周期。
-     *
-     * @return 已收敛的结论；{@code null} 表示"用户已允许，继续执行"
-     */
-    private ToolDispatch awaitConfirmation(ToolRunContext ctx, ToolDefinition definition,
-                                           ToolCall call, ToolInvocation invocation,
-                                           String argsSummary) {
-        long maxWaitSeconds = confirmWaitBudget(ctx);
-        if (maxWaitSeconds <= 0L) {
-            log.warn("[DEADLINE] 剩余生成预算不足以等待确认，🔴 不下发确认卡，直接按确认超时收敛："
-                            + "toolCallId={} toolKey={} round={}",
-                    call.getId(), definition.toolKey(), invocation.round());
-            return confirmTimedOut(ctx, definition, call, invocation, argsSummary);
-        }
-        recorder.markAwaitingConfirmation(call.getId(), argsSummary);
-        emit(ctx, definition, call, ToolCall.STATUS_AWAITING_CONFIRMATION, invocation.round(),
-                argsSummary, "", false, null, (int) maxWaitSeconds);
-
-        ToolConfirmDecision decision = confirmRegistry.await(ctx.tenantId(), ctx.messageId(),
-                call.getId(), ctx.cancellation(), maxWaitSeconds);
-        confirmRegistry.clearSignal(ctx.tenantId(), call.getId());
-
-        switch (decision) {
-            case ALLOW -> {
-                // 🔴 状态已由 confirm 接口在行锁内推进为 running，这里不得重复流转
-                return null;
-            }
-            case DENY -> {
-                // 🔴 状态与审计（tool.confirm_denied）已由 confirm 接口同事务写入，
-                //    这里只补下发终态帧 —— 重复流转会撞状态机（denied → denied 非法）
-                emit(ctx, definition, call, ToolCall.STATUS_DENIED, invocation.round(), argsSummary,
-                        "", false, ErrorCode.TOOL_DENIED);
-                return new ToolDispatch(Ids.toStr(call.getId()), ToolCall.STATUS_DENIED,
-                        ErrorCode.TOOL_DENIED, "用户拒绝了本次工具调用，请在不调用该工具的前提下继续回答",
-                        false);
-            }
-            case TIMEOUT -> {
-                return confirmTimedOut(ctx, definition, call, invocation, argsSummary);
-            }
-            default -> {
-                // CANCELLED：用户停止生成 / 会话删除 / 断连 —— 🔴 不写 confirm 审计（不是用户决定）
-                return terminal(ctx, definition, call, invocation.round(), argsSummary,
-                        ToolCall.STATUS_CANCELLED, null, "本次生成已被停止", null);
-            }
-        }
-    }
-
-    /**
-     * 本次确认的<b>实际等待上限</b>（秒）= {@code min(tool.confirm_wait_seconds, remaining − grace)}。
-     *
-     * <p>🔴 无 deadline 供给时（{@code usableSeconds == null}，无生成预算概念的调用方 / 单测）
-     * 退回 {@code sys_config} 的绝对上限，行为与 V1.4.2 之前一致。
-     */
-    private long confirmWaitBudget(ToolRunContext ctx) {
-        long configured = confirmRegistry.configuredWaitSeconds();
-        if (ctx.usableSeconds() == null) {
-            return configured;
-        }
-        return Math.min(configured, ctx.usableSeconds().getAsLong());
-    }
-
-    /**
-     * 确认等待超时的收敛（🔴 按<b>拒绝</b>处理：{@code timed_out} + {@code 30050} +
-     * 审计 {@code tool.confirm_timeout}，由生成线程写）。
-     *
-     * <p>🔴 "预算不足以等待"与"用户真的没点"复用<b>同一条</b>收敛路径 ——
-     * 状态、错误码、审计 action、回灌措辞完全一致（api-spec §7.8.1 ④ 明文要求）。
-     */
-    private ToolDispatch confirmTimedOut(ToolRunContext ctx, ToolDefinition definition,
-                                         ToolCall call, ToolInvocation invocation,
-                                         String argsSummary) {
-        AuditEvent audit = AuditEvent.tenant(ctx.tenantId(),
-                AuditActions.TOOL_CONFIRM_TIMEOUT, AuditResults.DENIED,
-                "toolCall", Ids.toStr(call.getId()), "confirmWaitTimeout",
-                ErrorCode.TOOL_DENIED);
-        return terminal(ctx, definition, call, invocation.round(), argsSummary,
-                ToolCall.STATUS_TIMED_OUT, ErrorCode.TOOL_DENIED,
-                "用户未在时限内确认，本次工具调用已按拒绝处理", null, audit);
     }
 
     /**
@@ -530,28 +389,17 @@ public class ToolOrchestrator {
 
     /**
      * 下发一帧（🔴 回调实现不得抛异常；这里再兜一层，保证工具链路不被写帧失败带崩）。
-     *
-     * <p>🔴 {@code confirmExpiresInSeconds} 恒 {@code null}：只有
-     * {@code awaiting_confirmation} 帧才携带它（api-spec §5.2），见下方重载。
      */
     private void emit(ToolRunContext ctx, ToolDefinition definition, ToolCall call, String status,
                       int round, String argsSummary, String resultSummary, boolean truncated,
                       Integer errorCode) {
-        emit(ctx, definition, call, status, round, argsSummary, resultSummary, truncated, errorCode,
-                null);
-    }
-
-    private void emit(ToolRunContext ctx, ToolDefinition definition, ToolCall call, String status,
-                      int round, String argsSummary, String resultSummary, boolean truncated,
-                      Integer errorCode, Integer confirmExpiresInSeconds) {
         if (ctx.listener() == null) {
             return;
         }
         try {
             ctx.listener().onProgress(new ToolProgress(Ids.toStr(call.getId()),
-                    definition.toolType(), definition.toolKey(), definition.riskLevel(), status,
-                    round, argsSummary, resultSummary, truncated, errorCode, null,
-                    confirmExpiresInSeconds));
+                    definition.toolType(), definition.toolKey(), status,
+                    round, argsSummary, resultSummary, truncated, errorCode, null));
         } catch (RuntimeException e) {
             log.warn("下发工具进度帧失败（不影响工具执行）：toolCallId={} status={}",
                     call.getId(), status);
@@ -671,12 +519,9 @@ public class ToolOrchestrator {
 
     /**
      * 未授权工具的占位定义（🔴 只为落库与下发帧提供最小信息）。
-     *
-     * <p>风险等级取 {@code high}：模型请求了一个我们不认识的工具，
-     * fail-safe 方向是"当作最危险的处理"，前端展示也应偏保守。
      */
     private ToolDefinition deniedPlaceholder(String toolKey) {
         return ToolDefinition.of(ToolDefinition.TYPE_LOCAL, toolKey, toolKey, "", null, "",
-                ToolRiskPolicy.RISK_HIGH, true, false, 1, null, null);
+                false, 1, null, null);
     }
 }

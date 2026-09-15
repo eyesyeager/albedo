@@ -21,7 +21,6 @@ import lombok.Setter;
  *   <li>🔴 {@code schema_changed} 的<b>已授权</b>工具<b>自动降级</b>为 {@code granted=0/disabled} 并写审计
  *       —— 防"先以无害 Schema 拿到授权，再偷换参数"的提权路径</li>
  *   <li>{@code removed} 保留历史行并置 {@code disabled}，🔴 不物理删除（保住 {@code tool_calls} 可追溯语义）</li>
- *   <li>{@code riskLevel} 未知一律 {@code high}，🔴 租户不可下调</li>
  * </ul>
  *
  * <p>🔴 一期<b>不缓存</b>授权清单：直读 MySQL，保证 DBA 改库（取消授权）后运行时立即拒绝
@@ -55,10 +54,6 @@ public class McpTool extends BaseTenantEntity {
     @Column(name = "input_schema_digest", nullable = false, length = 80)
     private String inputSchemaDigest = "";
 
-    /** low / medium / high（未知一律 high）。 */
-    @Column(name = "risk_level", nullable = false, length = 16)
-    private String riskLevel = RISK_HIGH;
-
     /** 🔴 默认 0；新发现工具不得自动获得授权。 */
     @Column(name = "granted", nullable = false, columnDefinition = "tinyint")
     private Integer granted = 0;
@@ -85,10 +80,6 @@ public class McpTool extends BaseTenantEntity {
 
     public static final String STATUS_ENABLED = "enabled";
     public static final String STATUS_DISABLED = "disabled";
-
-    public static final String RISK_LOW = "low";
-    public static final String RISK_MEDIUM = "medium";
-    public static final String RISK_HIGH = "high";
 
     public static final String CHANGE_NEW = "new";
     public static final String CHANGE_UNCHANGED = "unchanged";

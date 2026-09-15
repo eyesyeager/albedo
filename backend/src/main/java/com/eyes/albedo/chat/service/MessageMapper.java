@@ -148,7 +148,6 @@ public class MessageMapper {
                 Ids.toStr(row.getId()),
                 row.getToolType(),
                 row.getToolKey(),
-                row.getRiskLevel(),
                 row.getStatus(),
                 row.getRound() == null ? 1 : row.getRound(),
                 row.getArgsSummary(),

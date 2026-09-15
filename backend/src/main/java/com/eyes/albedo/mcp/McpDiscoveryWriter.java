@@ -139,7 +139,7 @@ public class McpDiscoveryWriter {
             reported.add(new McpDiscoveryReport.DiscoveredTool(removed.getToolKey(),
                     removed.getToolName(), removed.getDescription(),
                     McpDiscoveryService.DIGEST_PREFIX + removed.getInputSchemaDigest(),
-                    removed.getRiskLevel(), false, McpTool.STATUS_DISABLED,
+                    false, McpTool.STATUS_DISABLED,
                     McpTool.CHANGE_REMOVED));
         }
 
@@ -159,8 +159,6 @@ public class McpDiscoveryWriter {
         created.setDescription(truncateDescription(descriptor.description()));
         created.setInputSchema(schemaJson(descriptor));
         created.setInputSchemaDigest(digest);
-        // 🔴 平台侧默认风险等级：未知一律 high（api-spec §7.4.3 规则 6），租户不可下调
-        created.setRiskLevel(McpTool.RISK_HIGH);
         // 🔴 新发现工具默认禁用（AC-MCP-005 的核心断言）
         created.setGranted(0);
         created.setStatus(McpTool.STATUS_DISABLED);
@@ -196,7 +194,7 @@ public class McpDiscoveryWriter {
                                                      String digest, McpTool row) {
         return new McpDiscoveryReport.DiscoveredTool(toolKey, descriptor.name(),
                 row.getDescription(), McpDiscoveryService.DIGEST_PREFIX + digest,
-                row.getRiskLevel(), Integer.valueOf(1).equals(row.getGranted()),
+                Integer.valueOf(1).equals(row.getGranted()),
                 row.getStatus(), row.getChangeType());
     }
 

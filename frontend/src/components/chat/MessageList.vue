@@ -89,16 +89,7 @@ const showJumpToLatest = computed(
   () => !nearBottom.value && !props.generating && props.messages.length > 0,
 )
 
-/** 是否存在待确认的工具调用：用户不在底部时不强制滚动，只增强"回到最新"的语义 */
-const hasPendingConfirm = computed(() =>
-  props.messages.some((message) =>
-    message.toolCalls.some((call) => call.status === 'awaiting_confirmation'),
-  ),
-)
-
-const jumpLabel = computed(() =>
-  hasPendingConfirm.value ? t('chat.toolConfirm.pendingBadge') : t('chat.backToLatest'),
-)
+const jumpLabel = computed(() => t('chat.backToLatest'))
 
 /** 单一 live region 的内容：工具语义播报优先于通用生成状态 */
 const liveStatus = computed(() =>

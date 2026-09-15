@@ -27,7 +27,6 @@
           <ToolCallTimeline
             v-for="item in block.items"
             :key="item.key"
-            :message-id="message.messageId"
             :calls="item.kind === 'tools' ? item.calls : []"
           />
         </template>

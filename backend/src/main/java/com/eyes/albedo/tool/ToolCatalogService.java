@@ -173,12 +173,10 @@ public class ToolCatalogService {
             // Schema 自身非法 → 30060（在进模型之前失败）
             argsValidator.requireUsableSchema(tool.getToolKey(), tool.getInputSchema(), false);
 
-            String risk = riskPolicy.normalizeRisk(tool.getRiskLevel());
             ToolDefinition definition = ToolDefinition.of(ToolDefinition.TYPE_MCP,
                     tool.getToolKey(),
                     tool.getToolName(), tool.getDescription(), tool.getInputSchema(),
-                    tool.getInputSchemaDigest(), risk,
-                    riskPolicy.decide(risk, agentVersion).requiresConfirmation(),
+                    tool.getInputSchemaDigest(),
                     // MCP 工具的幂等性上游未声明：🔴 一律按**非幂等**处理（结果未知不自动重试，AC-TOL-003）
                     false,
                     effectiveMcpTimeout(server), server.getId(), null);
@@ -244,12 +242,10 @@ public class ToolCatalogService {
                         com.eyes.albedo.common.ErrorCode.RUNTIME_CONFIG_INVALID,
                         "超时秒数必须在 1~" + maxTimeout + " 之间");
             }
-            String risk = riskPolicy.normalizeRisk(tool.getRiskLevel());
             ToolDefinition definition = ToolDefinition.of(ToolDefinition.TYPE_LOCAL,
                     tool.getToolKey(),
                     tool.getName(), tool.getDescription(), tool.getInputSchema(),
-                    com.eyes.albedo.mcp.McpSchemaDigest.of(null), risk,
-                    riskPolicy.decide(risk, agentVersion).requiresConfirmation(),
+                    com.eyes.albedo.mcp.McpSchemaDigest.of(null),
                     tool.idempotentTool(), timeout, null, grant.getConfig());
             // 🔴 本地 tool_key 受 ^[a-z][a-z0-9_]{1,63}$ 约束，天然合规；仍统一校验以防注册表被改库绕过
             ToolFunctionNames.requireWithinLength(definition.toolKey(), definition.functionName(),

@@ -178,8 +178,8 @@ class LocalToolExecutorTest {
         assertEquals(ToolCall.STATUS_SUCCEEDED,
                 registry.execute(request(definition("demo_tool", true, 5))).status());
 
-        ToolDefinition weird = ToolDefinition.of("weird", "k", "k", "", null, "", "low",
-                false, true, 5, null, null);
+        ToolDefinition weird = ToolDefinition.of("weird", "k", "k", "", null, "",
+                true, 5, null, null);
         BusinessException ex = assertThrows(BusinessException.class, () -> registry.execute(
                 new ToolExecutor.ToolExecutionRequest("gift", 1L, weird, "{}")));
         assertEquals(ErrorCode.RUNTIME_CONFIG_INVALID, ex.getCode());
@@ -209,7 +209,7 @@ class LocalToolExecutorTest {
 
     private ToolDefinition definition(String toolKey, boolean idempotent, int timeoutSeconds) {
         return ToolDefinition.of(ToolDefinition.TYPE_LOCAL, toolKey, toolKey, "测试工具",
-                "{\"type\":\"object\"}", "", "low", false, idempotent, timeoutSeconds, null, null);
+                "{\"type\":\"object\"}", "", idempotent, timeoutSeconds, null, null);
     }
 
     private ToolExecutor.ToolExecutionRequest request(ToolDefinition definition) {

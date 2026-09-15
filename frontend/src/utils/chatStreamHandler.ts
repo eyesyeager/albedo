@@ -58,7 +58,6 @@ export function createStreamHandler(ctx: StreamHandlerContext): (event: ChatStre
       toolType: event.toolType,
       toolKey: event.toolKey,
       status: event.status,
-      riskLevel: event.riskLevel,
       round: event.round,
       summary: event.summary,
       argsSummary: event.argsSummary,
@@ -66,9 +65,6 @@ export function createStreamHandler(ctx: StreamHandlerContext): (event: ChatStre
       truncated: event.truncated,
       errorCode: event.errorCode,
       retryAfterSeconds: event.retryAfterSeconds,
-      // 🔴 逐字段拷贝的代价：漏一个字段就等于该字段在界面上不存在。
-      //    本字段决定确认卡倒计时的真实总时长（api-spec §5.2 / ADR-017 ③ⓑ）。
-      confirmExpiresInSeconds: event.confirmExpiresInSeconds ?? null,
     }
     if (call.toolCallId.length === 0) {
       // 无法定位的工具帧只能忽略（🔴 不得凭索引猜测目标，否则会串状态）

@@ -23,7 +23,6 @@ describe('buildMessageTimeline · 过程块与正文', () => {
       toolCallId: '9001',
       toolType: 'local',
       toolKey: 'calculator',
-      riskLevel: 'low',
       status: 'succeeded',
       round: 1,
       summary: 'result:1230.96',

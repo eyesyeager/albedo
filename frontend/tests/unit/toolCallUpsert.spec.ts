@@ -26,7 +26,6 @@ function call(overrides: Partial<ToolCallSummary> = {}): ToolCallSummary {
     toolType: 'mcp',
     toolKey: 'weather:query',
     status: 'pending',
-    riskLevel: 'low',
     round: 1,
     summary: '',
     argsSummary: 'city=上海',
@@ -62,16 +61,15 @@ describe('upsertToolCall · 按 toolCallId 原位更新', () => {
     expect(list[0].status).toBe('running')
   })
 
-  it('空帧不擦除既有摘要 / toolKey / riskLevel / round（M1 只发 summary 的旧帧也安全）', () => {
+  it('空帧不擦除既有摘要 / toolKey / round（M1 只发 summary 的旧帧也安全）', () => {
     const initial = upsertToolCall([], call({ argsSummary: 'city=上海', round: 2 }))
     const next = upsertToolCall(
       initial,
-      call({ status: 'succeeded', toolKey: '', riskLevel: '', round: 0, argsSummary: '' }),
+      call({ status: 'succeeded', toolKey: '', round: 0, argsSummary: '' }),
     )
 
     expect(next[0].status).toBe('succeeded')
     expect(next[0].toolKey).toBe('weather:query')
-    expect(next[0].riskLevel).toBe('low')
     expect(next[0].round).toBe(2)
     expect(next[0].argsSummary).toBe('city=上海')
   })

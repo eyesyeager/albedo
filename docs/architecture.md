@@ -823,13 +823,47 @@ sequenceDiagram
       还会让 Accept: application/json 的客户端在 handler mapping 阶段就得 406，直接违反 §1.2；
    ② 🔴 禁止把建流前失败改走 SSE 通道 —— 见 ADR-021 备选 (b)；
    ③ 🔴 两个 void 处理方法（AsyncRequestTimeoutException / AsyncRequestNotUsableException）
-      必须**保持 void**：响应已提交为 text/event-stream，写 JSON 会把垃圾字节插进 SSE 流。
-      配套：🔴 代码库中**永久禁止** SseEmitter.completeWithError(...)
-      （它会触发错误分派 → 把 JSON 写进已提交的流；SseWriter.markBroken 已明文选用 complete()）。
-```
+   必须**保持 void**：响应已提交为 text/event-stream，写 JSON 会把垃圾字节插进 SSE 流。
+   配套：🔴 代码库中**永久禁止** SseEmitter.completeWithError(...)
+   （它会触发错误分派 → 把 JSON 写进已提交的流；SseWriter.markBroken 已明文选用 complete()）。
+   ```
 
+   #### 9.3.2 AG-UI 协议迁移（🔴 彻底替换自定义 SSE，api-spec §5.5）
 
-### 9.4 前端为何不能用 `EventSource`
+   🔴 **迁移决策（用户拍板）**：彻底替换为 AG-UI 协议，前后端同步重写，请求侧完全对齐 `RunAgentInput`。
+
+   **传输差异（核心）**：AG-UI 事件类型内嵌在 `data` JSON 的 `type` 字段（PascalCase），**不使用** SSE 的
+   `event:` 行。因此 `AgUiWriter` 直接写 `SseEmitter.event().data(...)`（不带 `.name()`）。
+
+   **翻译层架构（关键设计，最小侵入）**：
+
+   ```
+   ChatStreamRunner  ──依赖──▶  StreamSink（接口，写出语义抽象）
+                           ├── SseWriter        （旧自定义 SSE 契约，迁移期兼容）
+                           └── AgUiStreamSink   （新：把 meta/delta/tool/error/done 翻译成 AG-UI 事件）
+                                    └──▶ AgUiWriter（Run 生命周期状态机 + 帧编码）
+   ```
+
+   - `ChatStreamRunner` 的编排逻辑**零改动**（仅 `SseWriter` 参数类型改为 `StreamSink` 接口）
+   - `AgUiStreamSink` 把既有写出语义翻译为 AG-UI 事件，见 api-spec §5.5.3 映射表
+   - `AgUiWriter` 维护 Run 生命周期（`RUN_STARTED` → 文本/推理/工具事件 → `RUN_FINISHED`/`RUN_ERROR`），
+   并自动闭合未闭合的 `TEXT_MESSAGE_*` / `REASONING_*` 消息
+
+   **前端翻译层（对称设计）**：`utils/streamRequest.ts` 把 AG-UI 事件**翻译回**内部 `ChatStreamEvent`
+   （meta/delta/tool/error/done），使 store / handler / 渲染组件**零改动**：
+   - `RUN_STARTED` → `meta`；`TEXT_MESSAGE_CONTENT` → `delta(text)`；`REASONING_MESSAGE_CONTENT` → `delta(reasoning)`
+   - `CUSTOM("tool_progress")` → `tool`（value 即 §5.2 的 12 字段）
+   - `CUSTOM("completion")` + `RUN_FINISHED`/`RUN_ERROR` → `done` / `error` + `done`
+
+   **关键约束延续（🔴 迁移不改这些纪律）**：
+   - 建流前失败仍走 HTTP 200 + `application/json`（§9.3.1 / ADR-021 不变；`/api/v1/agui/run` 已登记进
+   `SseRequests.COVERED_PATTERNS`，受 `SseTransportDisciplineScanTest` 守护）
+   - 鉴权段（20000~20005）仍清 token 整页跳 SSO（前端翻译层 `RUN_ERROR` 命中即 `redirectToSso()`）
+   - 🔴 **工具确认功能已删除（V1.3.0）**：`ToolConfirmRegistry` / `ToolConfirmService` / `ToolConfirmWriter`
+     等确认专用类整体移除，工具直接自动执行；风险等级（`riskLevel`）机制一并删除；
+     三段式事务（ADR-010）仍保留（pending / running / 终态+审计各自短事务 + 事务外执行）
+
+   ### 9.4 前端为何不能用 `EventSource`
 
 `EventSource` 无法设置自定义请求头 → 无法携带 `authorization`（本项目 Token 只走 Header，禁止落 URL）。因此统一用 `fetch + ReadableStream + TextDecoder` 手写 SSE 解析（`utils/streamRequest.ts`），并与 `request.ts` **完全一致**地处理：注入 token、回写响应头新 token、`20000~20005` 清 token 整页跳 SSO。
 

@@ -4,9 +4,7 @@
  * 🔴 纪律：
  *   1. 本文件只产出 **locale key**，字面量一律在 `locales/`，组件不得内联中文
  *   2. 能在工具节点解释的错误不升级为全局提示；只有无对应工具节点或整次生成不可继续时才用消息级块
- *   3. `timed_out` 的两种语义必须区分（api-spec §7.8.1）：
- *      - `errorCode=30050` → **确认等待超时**（语义等同拒绝，未执行）
- *      - `errorCode=30051` / `30056` → **执行超时 / 结果未知**（绝不暗示已成功）
+ *   3. `timed_out` 语义：`errorCode=30051` / `30056` → **执行超时 / 结果未知**（绝不暗示已成功）
  *   4. 一律不使用全局 Toast，避免同一 SSE 错误在状态条、消息块与 Toast 三处重复
  */
 import { ERROR_CODE } from '@/types/api'
@@ -52,10 +50,6 @@ export function toolErrorDescriptionKey(
 ): string {
   if (errorCode === null) {
     return ''
-  }
-  // 🔴 确认等待超时（timed_out + 30050）与执行超时（30051 / 30056）语义不可混淆
-  if (status === 'timed_out' && errorCode === ERROR_CODE.TOOL_DENIED) {
-    return 'errors.toolDenied.confirmTimeout'
   }
   const prefix = TOOL_LEVEL_PREFIX[errorCode]
   return prefix === undefined ? '' : `${prefix}.description`

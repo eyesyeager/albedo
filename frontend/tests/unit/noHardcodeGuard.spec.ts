@@ -29,8 +29,6 @@ const CJK = /[\u4e00-\u9fa5]/
 const M3_FILES = [
   'components/chat/ToolCallBar.vue',
   'components/chat/ToolCallTimeline.vue',
-  'components/chat/ToolConfirmCard.vue',
-  'components/chat/ToolConfirmCountdown.vue',
   'components/chat/RateLimitNote.vue',
   'components/chat/MessageErrorBlock.vue',
   'components/chat/MessageItem.vue',
@@ -39,7 +37,6 @@ const M3_FILES = [
   // M3.1 每日额度（design-system §15）
   'components/chat/QuotaStatusRail.vue',
   'stores/chat.ts',
-  'stores/toolConfirm.ts',
   'stores/rateLimit.ts',
   'stores/quota.ts',
   'utils/toolCall.ts',
@@ -145,43 +142,27 @@ describe('零硬编码守护 · 文案', () => {
       'chat.toolCall.summaryTruncated',
       'chat.toolCall.argsLabel',
       'chat.toolCall.resultLabel',
-      'chat.toolConfirm.title',
-      'chat.toolConfirm.argsLabel',
-      'chat.toolConfirm.allow',
-      'chat.toolConfirm.deny',
-      'chat.toolConfirm.announcement',
-      'chat.toolConfirm.remaining',
-      'chat.toolConfirm.expiring',
-      'chat.toolConfirm.submitting',
-      'chat.toolConfirm.stopping',
-      'chat.toolConfirm.expiredSyncing',
-      'chat.toolConfirm.stateSynced',
-      'chat.toolConfirm.pendingBadge',
       'errors.rateLimited.title',
       'errors.rateLimited.description',
       'errors.rateLimited.recovered',
       'errors.toolDenied.description',
-      'errors.toolDenied.confirmTimeout',
       'errors.toolTimeout.description',
       'errors.mcpUnavailable.description',
       'errors.toolArgsInvalid.description',
       'errors.toolLoopLimit.title',
-      'errors.toolConfirmConflict.description',
       'errors.toolRetryBlocked.description',
       'errors.toolExecutionFailed.description',
       'errors.runtimeConfigInvalid.title',
       'a11y.toolCallSummaryToggle',
-      'a11y.toolConfirmCard',
     ]
 
     const missing = required.filter((key) => t(key) === key)
     expect(missing).toEqual([])
   })
 
-  it('8 种工具状态在 locales 中都有兜底文案且互不重复', () => {
+  it('7 种工具状态在 locales 中都有兜底文案且互不重复', () => {
     const statuses = [
       'pending',
-      'awaiting_confirmation',
       'running',
       'succeeded',
       'failed',
@@ -197,15 +178,6 @@ describe('零硬编码守护 · 文案', () => {
 })
 
 describe('零硬编码守护 · 阈值只来自 sys_config', () => {
-  it('🔴 tool.confirmWaitSeconds 兜底必须为 0（未下发即不渲染倒计时，绝不用 120 兜底）', () => {
-    const source = read(join(SRC, 'stores/toolConfirm.ts'))
-    const fallbacks = [...source.matchAll(/'confirmWaitSeconds'\s*,\s*([^)]*)\)/g)].map((m) =>
-      m[1].trim(),
-    )
-
-    expect(fallbacks).toEqual(['0'])
-  })
-
   it('🔴 埋点批量上限与事件白名单兜底为空（不内置业务默认值）', () => {
     const source = read(join(SRC, 'utils/analytics.ts'))
 
@@ -215,11 +187,10 @@ describe('零硬编码守护 · 阈值只来自 sys_config', () => {
     )
   })
 
-  it('🔴 状态 / 风险文案只从 display.toolStatusLabels / toolRiskLabels 读取', () => {
+  it('🔴 状态文案只从 display.toolStatusLabels 读取', () => {
     const timeline = read(join(SRC, 'components/chat/ToolCallTimeline.vue'))
 
     expect(timeline).toContain("configStore.raw('display', 'toolStatusLabels')")
-    expect(timeline).toContain("configStore.raw('display', 'toolRiskLabels')")
   })
 
   it('🔴 限流等待秒数只来自服务端 retryAfterSeconds，源码中无兜底秒数', () => {
@@ -358,12 +329,9 @@ describe('渲染与动效纪律守护', () => {
   })
 
   it('🔴 倒计时进度只用 transform: scaleX，不动画 width', () => {
-    const card = read(join(SRC, 'components/chat/ToolConfirmCard.vue'))
-    const countdown = read(join(SRC, 'components/chat/ToolConfirmCountdown.vue'))
+    const countdown = read(join(SRC, 'composables/useCountdown.ts'))
 
-    expect(card + countdown).toContain('scaleX')
-    expect(stripComments(blocks(card, 'style'))).not.toMatch(/transition:[^;]*width/)
-    expect(stripComments(blocks(countdown, 'style'))).not.toMatch(/transition:[^;]*width/)
+    expect(countdown).toContain('scaleX')
   })
 
   it('所有 M3 组件的位移 / 淡入动画都提供 prefers-reduced-motion 降级', () => {

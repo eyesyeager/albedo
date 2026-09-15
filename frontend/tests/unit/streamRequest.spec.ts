@@ -43,11 +43,12 @@ describe('streamRequest · SSE 解析', () => {
       vi.fn(() =>
         Promise.resolve(
           sseResponse([
-            'event: meta\ndata: {"conversationId":"1001","messageId":"5002","agentVersion":5,"userMessageId":"5001"}\n\n',
+            'data: {"type":"RUN_STARTED","threadId":"1001","runId":"5002","input":{"conversationId":"1001","userMessageId":"5001","agentVersion":5}}\n\n',
             ': ping\n\n',
-            'event: delta\ndata: {"text":"你好"}\n\n',
-            'event: delta\ndata: {"text":"，世界"}\n\n',
-            'event: done\ndata: {"finishReason":"stop","messageId":"5002","status":"completed","title":"打招呼"}\n\n',
+            'data: {"type":"TEXT_MESSAGE_CONTENT","messageId":"5002","delta":"你好"}\n\n',
+            'data: {"type":"TEXT_MESSAGE_CONTENT","messageId":"5002","delta":"，世界"}\n\n',
+            'data: {"type":"CUSTOM","name":"completion","value":{"finishReason":"stop","messageId":"5002","status":"completed","title":"打招呼"}}\n\n',
+            'data: {"type":"RUN_FINISHED","outcome":{"type":"success"}}\n\n',
           ]),
         ),
       ),
@@ -78,9 +79,10 @@ describe('streamRequest · SSE 解析', () => {
       vi.fn(() =>
         Promise.resolve(
           sseResponse([
-            'event: del',
-            'ta\ndata: {"text":"分片',
-            '拼接"}\n\nevent: done\ndata: {"finishReason":"stop","messageId":"1","status":"completed","title":null}\n\n',
+            'data: {"type":"TEXT_MESSAGE_CONTENT","messageId":"1","delta":"分片',
+            '拼接"}\n\n',
+            'data: {"type":"CUSTOM","name":"completion","value":{"finishReason":"stop","messageId":"1","status":"completed","title":null}}\n\n',
+            'data: {"type":"RUN_FINISHED","outcome":{"type":"success"}}\n\n',
           ]),
         ),
       ),
@@ -100,8 +102,8 @@ describe('streamRequest · SSE 解析', () => {
       vi.fn(() =>
         Promise.resolve(
           sseResponse([
-            'event: error\r\ndata: {"code":50002,"message":"模型暂不可用"}\r\n\r\n',
-            'event: done\r\ndata: {"finishReason":"failed","messageId":"9","status":"failed","title":null}\r\n\r\n',
+            'data: {"type":"CUSTOM","name":"completion","value":{"finishReason":"failed","messageId":"9","status":"failed","title":null,"errorCode":50002,"errorMessage":"模型暂不可用"}}\r\n\r\n',
+            'data: {"type":"RUN_ERROR","message":"模型暂不可用","code":"50002"}\r\n\r\n',
           ]),
         ),
       ),
@@ -167,7 +169,7 @@ describe('streamRequest · SSE 解析', () => {
     const stub = stubLocation()
     vi.stubGlobal(
       'fetch',
-      vi.fn(() => Promise.resolve(sseResponse(['event: error\ndata: {"code":20001,"message":"token 非法"}\n\n']))),
+      vi.fn(() => Promise.resolve(sseResponse(['data: {"type":"RUN_ERROR","message":"token 非法","code":"20001"}\n\n']))),
     )
 
     const { events, onEvent } = collect()

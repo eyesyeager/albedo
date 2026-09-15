@@ -66,7 +66,6 @@ function toolCall(overrides: Partial<ToolCallSummary> = {}): ToolCallSummary {
     toolType: 'mcp',
     toolKey: 'weather:query',
     status: 'succeeded',
-    riskLevel: 'low',
     round: 1,
     summary: 'city=上海',
     argsSummary: 'city=上海，手机号 13800001111',

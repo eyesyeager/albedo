@@ -100,7 +100,6 @@ describe('ReasoningPanel · 工具栏内嵌', () => {
     toolCallId: '9001',
     toolType: 'local',
     toolKey: 'calculator',
-    riskLevel: 'low',
     status: 'succeeded',
     round: 1,
     summary: 'result:1230.96',

@@ -27,18 +27,15 @@ public class ChatCancelService {
     private final TenantCacheKeys cacheKeys;
     private final CancelRegistry cancelRegistry;
     private final BusinessConfig businessConfig;
-    private final com.eyes.albedo.tool.ToolConfirmRegistry confirmRegistry;
 
     public ChatCancelService(StringRedisTemplate redis,
                             TenantCacheKeys cacheKeys,
                             CancelRegistry cancelRegistry,
-                            BusinessConfig businessConfig,
-                            com.eyes.albedo.tool.ToolConfirmRegistry confirmRegistry) {
+                            BusinessConfig businessConfig) {
         this.redis = redis;
         this.cacheKeys = cacheKeys;
         this.cancelRegistry = cancelRegistry;
         this.businessConfig = businessConfig;
-        this.confirmRegistry = confirmRegistry;
     }
 
     /**
@@ -51,21 +48,16 @@ public class ChatCancelService {
     /**
      * 请求取消（显式租户，供异步任务使用）。
      *
-     * <p>🔴 <b>三路收敛的第一棒</b>（architecture.md §9.5.4 / ADR-008 第 9 条）：
+     * <p>🔴 <b>双路收敛</b>（architecture.md §9.5.4）：
      * <ol>
      *   <li>写 Redis 取消标记（跨实例兜底）</li>
      *   <li>关闭本机上游流（生成线程若在读流，立刻结束）</li>
-     *   <li>🔴 <b>唤醒确认等待</b>：生成线程若正挂在 {@code ToolConfirmRegistry.await(...)}，
-     *       关流<b>不会</b>唤醒它（它没在读流）。不做这一步，用户点了停止仍会白等满
-     *       {@code tool.confirm_wait_seconds}（默认 120s）—— 64 个线程被这样占住就是可用性事故（AR-008）</li>
      * </ol>
      */
     public void cancel(String tenantId, long messageId) {
         mark(tenantId, messageId);
         boolean localHit = cancelRegistry.close(messageId);
-        int confirmWaiters = confirmRegistry.cancelByMessage(messageId);
-        log.info("已请求停止生成：messageId={} localHit={} confirmWaitersWoken={}",
-                messageId, localHit, confirmWaiters);
+        log.info("已请求停止生成：messageId={} localHit={}", messageId, localHit);
     }
 
     /**

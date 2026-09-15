@@ -22,12 +22,8 @@ import com.fasterxml.jackson.annotation.JsonInclude;
  * @param toolType             {@code local} | {@code mcp}
  * @param toolKey              工具标识
  * @param toolName             工具展示名快照
- * @param riskLevel            风险等级
  * @param status               状态机取值
  * @param errorCode            终态失败时的数字业务码，否则 {@code null}
- * @param requiresConfirmation 是否需要用户确认
- * @param decision             用户决定（{@code allow}/{@code deny}），未决定为 {@code null}
- * @param decidedAt            决定时间（ISO-8601 UTC）
  * @param argsSummary          入参脱敏摘要
  * @param resultSummary        结果脱敏摘要
  * @param truncated            结果是否被字节截断
@@ -42,12 +38,8 @@ public record ToolCallDTO(String toolCallId,
                           String toolType,
                           String toolKey,
                           String toolName,
-                          String riskLevel,
                           String status,
                           Integer errorCode,
-                          boolean requiresConfirmation,
-                          String decision,
-                          String decidedAt,
                           String argsSummary,
                           String resultSummary,
                           boolean truncated,

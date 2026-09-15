@@ -122,7 +122,6 @@ public final class SseEvents {
     public record Tool(String toolCallId,
                        String toolType,
                        String toolKey,
-                       String riskLevel,
                        String status,
                        int round,
                        String summary,
@@ -130,8 +129,7 @@ public final class SseEvents {
                        String resultSummary,
                        boolean truncated,
                        Integer errorCode,
-                       Integer retryAfterSeconds,
-                       Integer confirmExpiresInSeconds) {
+                       Integer retryAfterSeconds) {
 
         /**
          * 由工具侧中立进度对象翻译而来（🔴 {@code tool} 包不得依赖 {@code chat}，故翻译发生在这里）。
@@ -140,10 +138,9 @@ public final class SseEvents {
             String summary = progress.beforeResult()
                     ? progress.argsSummary() : progress.resultSummary();
             return new Tool(progress.toolCallId(), progress.toolType(), progress.toolKey(),
-                    progress.riskLevel(), progress.status(), progress.round(), summary,
+                    progress.status(), progress.round(), summary,
                     progress.argsSummary(), progress.resultSummary(), progress.truncated(),
-                    progress.errorCode(), progress.retryAfterSeconds(),
-                    progress.confirmExpiresInSeconds());
+                    progress.errorCode(), progress.retryAfterSeconds());
         }
     }
 

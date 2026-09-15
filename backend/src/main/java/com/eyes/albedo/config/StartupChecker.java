@@ -83,8 +83,6 @@ public class StartupChecker implements ApplicationRunner {
             new String[]{ConfigKeys.GROUP_MODEL, ConfigKeys.MODEL_PROVIDERS},
             // ===== M3 新增 23 键（api-spec §7.1.2 / architecture.md §13.6） =====
             new String[]{ConfigKeys.GROUP_TOOL, ConfigKeys.TOOL_MAX_ROUNDS},
-            new String[]{ConfigKeys.GROUP_TOOL, ConfigKeys.TOOL_CONFIRM_WAIT_SECONDS},
-            new String[]{ConfigKeys.GROUP_TOOL, ConfigKeys.TOOL_CONFIRM_POLL_INTERVAL_MILLIS},
             new String[]{ConfigKeys.GROUP_TOOL, ConfigKeys.TOOL_DEFAULT_TIMEOUT_SECONDS},
             new String[]{ConfigKeys.GROUP_TOOL, ConfigKeys.TOOL_MAX_TIMEOUT_SECONDS},
             new String[]{ConfigKeys.GROUP_TOOL, ConfigKeys.TOOL_RESULT_MAX_BYTES},
@@ -112,7 +110,6 @@ public class StartupChecker implements ApplicationRunner {
                     ConfigKeys.OBSERVABILITY_ANALYTICS_ENABLED},
             new String[]{ConfigKeys.GROUP_OBSERVABILITY,
                     ConfigKeys.OBSERVABILITY_ANALYTICS_SAMPLE_RATE},
-            new String[]{ConfigKeys.GROUP_DISPLAY, ConfigKeys.TOOL_RISK_LABELS},
             // 🔴 V1.1.3 / V1.3.2 第 23 键（① 裁决）：system 消息总长预算
             new String[]{ConfigKeys.GROUP_CHAT, ConfigKeys.CHAT_SYSTEM_PROMPT_MAX_CHARS},
             // 🔴 V1.4.2 ADR-017 / ADR-018 新增 3 键（api-spec §7.1.2 第 30 / 31 / 32 键，29 → 32）：
@@ -448,18 +445,16 @@ public class StartupChecker implements ApplicationRunner {
     private void warnWorstCaseRoundBudget(long deadline) {
         Long maxRounds = strictLong(ConfigKeys.GROUP_TOOL, ConfigKeys.TOOL_MAX_ROUNDS);
         Long maxTimeout = strictLong(ConfigKeys.GROUP_TOOL, ConfigKeys.TOOL_MAX_TIMEOUT_SECONDS);
-        Long confirmWait = strictLong(ConfigKeys.GROUP_TOOL, ConfigKeys.TOOL_CONFIRM_WAIT_SECONDS);
-        if (maxRounds == null || maxTimeout == null || confirmWait == null) {
+        if (maxRounds == null || maxTimeout == null) {
             return;
         }
-        long worstCase = maxRounds * (maxTimeout + confirmWait);
+        long worstCase = maxRounds * maxTimeout;
         if (worstCase > deadline) {
-            log.warn("最坏轮次预算 {}s = {}.{}({}) ×({}.{}({}) + {}.{}({})) 超过 {}.{}={}s："
+            log.warn("最坏轮次预算 {}s = {}.{}({}) × {}.{}({}) 超过 {}.{}={}s："
                             + "最坏情形跑不完全部工具轮次，本次生成会以 done(timeout) 收敛"
                             + "（🔴 有意为之：单次生成不允许无限延长，architecture.md §13.6 纪律 9）",
                     worstCase, ConfigKeys.GROUP_TOOL, ConfigKeys.TOOL_MAX_ROUNDS, maxRounds,
                     ConfigKeys.GROUP_TOOL, ConfigKeys.TOOL_MAX_TIMEOUT_SECONDS, maxTimeout,
-                    ConfigKeys.GROUP_TOOL, ConfigKeys.TOOL_CONFIRM_WAIT_SECONDS, confirmWait,
                     ConfigKeys.GROUP_CHAT, ConfigKeys.CHAT_GENERATION_DEADLINE_SECONDS, deadline);
         }
     }

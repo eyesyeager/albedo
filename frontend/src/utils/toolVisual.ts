@@ -10,7 +10,6 @@ import {
   CircleX,
   Clock3,
   LoaderCircle,
-  ShieldAlert,
   ShieldX,
   TimerOff,
 } from 'lucide-vue-next'
@@ -23,7 +22,6 @@ export type ToolStatusTone = 'neutral' | 'running' | 'success' | 'warning' | 'da
 
 const ICONS: Readonly<Record<string, Component>> = {
   pending: Clock3,
-  awaiting_confirmation: ShieldAlert,
   running: LoaderCircle,
   succeeded: CheckCircle2,
   failed: CircleX,
@@ -34,7 +32,6 @@ const ICONS: Readonly<Record<string, Component>> = {
 
 const TONES: Readonly<Record<string, ToolStatusTone>> = {
   pending: 'neutral',
-  awaiting_confirmation: 'warning',
   running: 'running',
   succeeded: 'success',
   failed: 'danger',

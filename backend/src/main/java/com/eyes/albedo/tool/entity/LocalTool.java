@@ -12,7 +12,7 @@ import lombok.Setter;
  * 平台本地 Tool 注册表（🔴 {@code scope=platform}，architecture.md §13.5.5）。
  *
  * <p>为什么<b>不</b>继承 {@code BaseTenantEntity}（§6.4 已登记）：这是<b>平台注册表</b>，
- * 租户只读；{@code riskLevel} 放在平台表正是为了让"租户不可自行下调风险等级"在数据层成立。
+ * 租户只读。
  *
  * <p>🔴 <b>单行表 + {@code version} 就地递增</b>（V1.1.1 裁定）：
  * {@code uk_tool_key(tool_key)} 全局唯一，同一 {@code toolKey} <b>永远只有一行</b>，
@@ -55,10 +55,6 @@ public class LocalTool extends BaseAuditEntity {
     @Column(name = "output_constraint", columnDefinition = "text")
     private String outputConstraint;
 
-    /** low / medium / high；🔴 租户不可下调（本表租户无写权限）。 */
-    @Column(name = "risk_level", nullable = false, length = 16)
-    private String riskLevel = RISK_HIGH;
-
     /** 0 = 非幂等；🔴 结果未知时一律不自动重试（{@code 30056}，AC-TOL-003）。 */
     @Column(name = "idempotent", nullable = false, columnDefinition = "tinyint")
     private Integer idempotent = 0;
@@ -73,10 +69,6 @@ public class LocalTool extends BaseAuditEntity {
 
     public static final String STATUS_ENABLED = "enabled";
     public static final String STATUS_DISABLED = "disabled";
-
-    public static final String RISK_LOW = "low";
-    public static final String RISK_MEDIUM = "medium";
-    public static final String RISK_HIGH = "high";
 
     /** {@code tool_key} 格式（api-spec §7.7.1）。 */
     public static final String TOOL_KEY_PATTERN = "^[a-z][a-z0-9_]{1,63}$";

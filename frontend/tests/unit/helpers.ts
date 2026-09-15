@@ -17,6 +17,7 @@ export interface LocationStub {
   search: string
   hash: string
   host: string
+  hostname: string
   origin: string
   reload: () => void
 }
@@ -29,6 +30,7 @@ export function stubLocation(initial = 'http://localhost:5173/chat'): LocationSt
     search: url.search,
     hash: url.hash,
     host: url.host,
+    hostname: url.hostname,
     origin: url.origin,
     reload: () => undefined,
   }

@@ -78,7 +78,6 @@ class MessageMapperToolCallsTest {
         call.setMessageId(messageId);
         call.setToolType(ToolCall.TOOL_TYPE_LOCAL);
         call.setToolKey(toolKey);
-        call.setRiskLevel("low");
         call.setStatus(status);
         call.setRound(1);
         call.setArgsSummary("timezone=Asia/Shanghai");
@@ -138,7 +137,7 @@ class MessageMapperToolCallsTest {
     }
 
     @Test
-    @DisplayName("🔴 12 个字段一个不能少（含允许为 null 的 errorCode / retryAfterSeconds）")
+    @DisplayName("🔴 11 个字段一个不能少（含允许为 null 的 errorCode / retryAfterSeconds）")
     void allContractFieldsArePresentInJson() throws Exception {
         when(toolCallRepository.findByMessageIdInOrderByCreatedAtAscIdAsc(anyCollection()))
                 .thenReturn(List.of(
@@ -147,7 +146,7 @@ class MessageMapperToolCallsTest {
         MessageDTO dto = mapper.toDTO(message(5002L, Message.ROLE_ASSISTANT));
         var node = objectMapper.valueToTree(dto.toolCalls().get(0));
 
-        for (String field : List.of("toolCallId", "toolType", "toolKey", "riskLevel", "status",
+        for (String field : List.of("toolCallId", "toolType", "toolKey", "status",
                 "round", "summary", "argsSummary", "resultSummary", "truncated", "errorCode",
                 "retryAfterSeconds")) {
             assertTrue(node.has(field), "缺字段：" + field);

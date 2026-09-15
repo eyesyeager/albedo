@@ -23,7 +23,7 @@ import com.eyes.albedo.chat.ai.StreamWatchdog;
 import com.eyes.albedo.chat.dto.MessageSegment;
 import com.eyes.albedo.chat.dto.PreparedGeneration;
 import com.eyes.albedo.chat.entity.Message;
-import com.eyes.albedo.chat.sse.SseWriter;
+import com.eyes.albedo.chat.sse.StreamSink;
 import com.eyes.albedo.common.BusinessException;
 import com.eyes.albedo.common.ErrorCode;
 import com.eyes.albedo.common.Ids;
@@ -34,7 +34,6 @@ import com.eyes.albedo.sysconfig.ConfigKeys;
 import com.eyes.albedo.tenant.TenantFilter;
 import com.eyes.albedo.tool.ToolCallRecorder;
 import com.eyes.albedo.tool.ToolCatalogService;
-import com.eyes.albedo.tool.ToolConfirmRegistry;
 import com.eyes.albedo.tool.ToolOrchestrator;
 import com.eyes.albedo.tool.dto.ToolDefinition;
 
@@ -96,7 +95,6 @@ public class ChatStreamRunner {
     private final ToolCatalogService toolCatalogService;
     private final ToolOrchestrator toolOrchestrator;
     private final ToolCallRecorder toolCallRecorder;
-    private final ToolConfirmRegistry toolConfirmRegistry;
     /**
      * 🔴 V1.4.5（ADR-020）：{@code chat → quota} 的唯一依赖方向。
      *
@@ -117,7 +115,6 @@ public class ChatStreamRunner {
                             ToolCatalogService toolCatalogService,
                             ToolOrchestrator toolOrchestrator,
                             ToolCallRecorder toolCallRecorder,
-                            ToolConfirmRegistry toolConfirmRegistry,
                             com.eyes.albedo.quota.service.QuotaService quotaService) {
         this.chatService = chatService;
         this.conversationService = conversationService;
@@ -132,14 +129,13 @@ public class ChatStreamRunner {
         this.toolCatalogService = toolCatalogService;
         this.toolOrchestrator = toolOrchestrator;
         this.toolCallRecorder = toolCallRecorder;
-        this.toolConfirmRegistry = toolConfirmRegistry;
         this.quotaService = quotaService;
     }
 
     /**
      * 执行一次生成（含多轮工具编排）。
      */
-    public void run(PreparedGeneration prepared, SseWriter writer) {
+    public void run(PreparedGeneration prepared, StreamSink writer) {
         long assistantId = prepared.assistantMessageId();
         log.info("[ChatStream] 开始流式生成 assistantId={} conversationId={} agentId={} version={} tenant={} uid={}",
                 assistantId, prepared.conversationId(), prepared.runtime().agentId(), prepared.runtime().version(),
@@ -178,9 +174,6 @@ public class ChatStreamRunner {
         } finally {
             watchdog.cancel(heartbeat);
             cancelRegistry.unregister(assistantId);
-            // 🔴 §9.5.4 ②：唤醒可能仍挂在确认等待上的线程（本方法自身即将退出，
-            //    但同一消息的其它等待者必须被收敛，绝不留下白等 120s 的线程）
-            toolConfirmRegistry.cancelByMessage(assistantId);
             // 🔴 §9.5.4 不变量 3：流结束时把残留的非终态工具调用统一收敛为 cancelled
             //    （否则查询接口会出现"永远在执行中"的僵尸卡片）
             toolCallRecorder.cancelPendingByMessage(assistantId);
@@ -225,7 +218,7 @@ public class ChatStreamRunner {
                 AuditSanitizer.reason(diagnostic), AuditSanitizer.reason(e.getMessage()));
     }
 
-    private void generate(PreparedGeneration prepared, SseWriter writer, StringBuilder buffer,
+    private void generate(PreparedGeneration prepared, StreamSink writer, StringBuilder buffer,
                           StringBuilder reasoningBuffer, SegmentAccumulator segments,
                           AtomicLong lastActivity, QuotaSettlement settlement) {
         long assistantId = prepared.assistantMessageId();
@@ -247,7 +240,7 @@ public class ChatStreamRunner {
                 prepared.conversationId(), prepared.runtime(), agentVersion, !catalog.isEmpty()));
         int maxRounds = businessConfig.requireInt(ConfigKeys.GROUP_TOOL, ConfigKeys.TOOL_MAX_ROUNDS);
         ToolOrchestrator.ToolRunContext toolContext =
-                toolContext(prepared, catalog, writer, deadline, agentVersion.getId());
+                toolContext(prepared, catalog, writer, agentVersion.getId());
 
         int round = 0;
         boolean deniedInLastRound = false;
@@ -400,8 +393,7 @@ public class ChatStreamRunner {
      */
     private ToolOrchestrator.ToolRunContext toolContext(PreparedGeneration prepared,
                                                         List<ToolDefinition> catalog,
-                                                        SseWriter writer,
-                                                        GenerationDeadline deadline,
+                                                        StreamSink writer,
                                                         long agentVersionId) {
         // 🔴 异步段读不到 Servlet 请求：审计上下文用快照 uid 显式构造（§9.5.2 第 3 条 / AR-013）
         AuditContext auditContext = new AuditContext(MDC.get("requestId"),
@@ -410,12 +402,6 @@ public class ChatStreamRunner {
                 prepared.conversationId(), prepared.assistantMessageId(), catalog, auditContext,
                 // 🔴 tool → chat 的唯一出口：把中立进度翻译成 SSE tool 帧
                 writer::tool,
-                () -> cancelService.isCancelled(prepared.tenantId(), prepared.assistantMessageId())
-                        || writer.broken(),
-                // 🔴 ADR-017 ③ⓑ：确认等待上限 = min(tool.confirm_wait_seconds, remaining − grace)。
-                //    只传"剩余可用秒数"的供给器（LongSupplier），不把 chat 的对象暴露给 tool 包
-                //    —— tool 不得依赖 chat（§5.1.3 防成环）。
-                deadline::usableSeconds,
                 agentVersionId);
     }
 
@@ -448,7 +434,7 @@ public class ChatStreamRunner {
 
     // ===================== 分片与收敛 =====================
 
-    private void onDelta(SseWriter writer, StringBuilder buffer, AtomicLong lastActivity, String delta) {
+    private void onDelta(StreamSink writer, StringBuilder buffer, AtomicLong lastActivity, String delta) {
         buffer.append(delta);
         lastActivity.set(System.currentTimeMillis());
         // 客户端断开后 writer 自动静默；内容仍继续累积以便落库（EX-015）
@@ -463,7 +449,7 @@ public class ChatStreamRunner {
      * <p>🔴 <b>但必须刷新 {@code lastActivity}</b>：否则纯推理阶段（可能持续数秒无正文）
      * 会被心跳逻辑判为"长时间无分片"而误发 ping 甚至触发上层空闲判定。
      */
-    private void onReasoning(SseWriter writer, StringBuilder reasoningBuffer,
+    private void onReasoning(StreamSink writer, StringBuilder reasoningBuffer,
                              AtomicLong lastActivity, String reasoning) {
         reasoningBuffer.append(reasoning);
         lastActivity.set(System.currentTimeMillis());
@@ -525,7 +511,7 @@ public class ChatStreamRunner {
         }
     }
 
-    private void completeSuccessfully(PreparedGeneration prepared, SseWriter writer,
+    private void completeSuccessfully(PreparedGeneration prepared, StreamSink writer,
                                       String content, String reasoning,
                                       SegmentAccumulator segments, AiStreamOutcome outcome) {
         long assistantId = prepared.assistantMessageId();
@@ -556,7 +542,7 @@ public class ChatStreamRunner {
         writer.done(finishReason, Ids.toStr(assistantId), Message.STATUS_COMPLETED, title);
     }
 
-    private void failGracefully(PreparedGeneration prepared, SseWriter writer, String content,
+    private void failGracefully(PreparedGeneration prepared, StreamSink writer, String content,
                                 String reasoning, SegmentAccumulator segments,
                                 int code, String message, String finishReason) {
         long assistantId = prepared.assistantMessageId();
@@ -648,7 +634,7 @@ public class ChatStreamRunner {
      * 由 {@link #failGracefully} 承担；{@code tool_calls} 的非终态由 {@code run()} 的
      * finally 统一收敛为 {@code cancelled}（不变量 3）。
      */
-    private void convergeOnDeadline(PreparedGeneration prepared, SseWriter writer,
+    private void convergeOnDeadline(PreparedGeneration prepared, StreamSink writer,
                                     StringBuilder buffer, StringBuilder reasoningBuffer,
                                     SegmentAccumulator segments, GenerationDeadline deadline,
                                     int round, String cause) {
@@ -670,7 +656,7 @@ public class ChatStreamRunner {
      * 本心跳跑在 {@link StreamWatchdog} 的独立调度线程上，
      * 因此生成线程挂在确认等待时它<b>照常发 {@code : ping}</b>。
      */
-    private ScheduledFuture<?> startHeartbeat(SseWriter writer, AtomicLong lastActivity) {
+    private ScheduledFuture<?> startHeartbeat(StreamSink writer, AtomicLong lastActivity) {
         long heartbeatSeconds = businessConfig.requireLong(ConfigKeys.GROUP_CHAT,
                 ConfigKeys.STREAM_HEARTBEAT_SECONDS);
         return watchdog.scheduleHeartbeat(() -> {
@@ -683,7 +669,7 @@ public class ChatStreamRunner {
     /**
      * 用于幂等回放：把既有 assistant 消息作为一次性流回放给客户端（EX-013）。
      */
-    public void replay(SseWriter writer, String conversationId, String userMessageId, Message assistant) {
+    public void replay(StreamSink writer, String conversationId, String userMessageId, Message assistant) {
         try {
             if (assistant.getContent() != null && !assistant.getContent().isEmpty()) {
                 writer.delta(assistant.getContent());

@@ -39,11 +39,14 @@ public final class SseRequests {
     public static final String PATTERN_SEND = "/api/v1/conversations/{conversationId}/messages";
     /** 重新生成（建流）端点的映射模式。 */
     public static final String PATTERN_REGENERATE = "/api/v1/messages/{messageId}/regenerate";
+    /** 🔴 AG-UI 运行端点（彻底替换协议的新建流端点）。 */
+    public static final String PATTERN_AGUI_RUN = "/api/v1/agui/run";
 
     /**
      * 🔴 已被 L1/L2 类用例覆盖的 SSE 端点集合（{@code SseTransportDisciplineScanTest} 的比对基准）。
      */
-    public static final List<String> COVERED_PATTERNS = List.of(PATTERN_SEND, PATTERN_REGENERATE);
+    public static final List<String> COVERED_PATTERNS =
+            List.of(PATTERN_SEND, PATTERN_REGENERATE, PATTERN_AGUI_RUN);
 
     private SseRequests() {
     }

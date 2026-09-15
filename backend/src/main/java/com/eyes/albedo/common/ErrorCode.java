@@ -67,8 +67,6 @@ public final class ErrorCode {
     public static final int TOOL_ARGS_INVALID = 30053;
     /** 单次生成的工具调用轮次超过 sys_config: tool.max_rounds。 */
     public static final int TOOL_LOOP_LIMIT_EXCEEDED = 30054;
-    /** 同一 toolCallId 提交与既有决定相反的 decision（api-spec §7.8.2 状态机）。 */
-    public static final int TOOL_CONFIRM_CONFLICT = 30055;
     /** 非幂等工具结果未知，禁止自动重试（EX-019 / AC-TOL-003）。 */
     public static final int TOOL_RETRY_BLOCKED = 30056;
     /** 工具执行返回业务失败（非超时、非鉴权、非参数错误）。 */
@@ -134,7 +132,7 @@ public final class ErrorCode {
             TENANT_CONTEXT_MISSING, VERSION_CONFLICT, PUBLISH_VALIDATE_FAILED,
             AGENT_UNAVAILABLE, AGENT_DISABLED, CONVERSATION_READONLY, MESSAGE_TOO_LONG,
             TOOL_DENIED, TOOL_TIMEOUT, MCP_UNAVAILABLE, TOOL_ARGS_INVALID,
-            TOOL_LOOP_LIMIT_EXCEEDED, TOOL_CONFIRM_CONFLICT, TOOL_RETRY_BLOCKED,
+            TOOL_LOOP_LIMIT_EXCEEDED, TOOL_RETRY_BLOCKED,
             TOOL_EXECUTION_FAILED, RUNTIME_CONFIG_INVALID, CACHE_INVALIDATION_FAILED,
             // 🔴 V1.2.5（ADR-020 ④）：漏加这一项会让 30070 在埋点里被**静默置空**
             DAILY_QUOTA_EXHAUSTED,
@@ -190,7 +188,6 @@ public final class ErrorCode {
             case MCP_UNAVAILABLE -> "MCP 服务不可用";
             case TOOL_ARGS_INVALID -> "工具入参不符合约定";
             case TOOL_LOOP_LIMIT_EXCEEDED -> "已达工具调用上限";
-            case TOOL_CONFIRM_CONFLICT -> "确认决定与服务端记录冲突";
             case TOOL_RETRY_BLOCKED -> "工具结果待确认，不可自动重试";
             case TOOL_EXECUTION_FAILED -> "工具执行失败";
             case RUNTIME_CONFIG_INVALID -> "配置校验失败";

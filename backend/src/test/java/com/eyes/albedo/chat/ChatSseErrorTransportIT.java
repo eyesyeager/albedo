@@ -202,6 +202,28 @@ class ChatSseErrorTransportIT {
         assertAcceptInvariance(bodies);
     }
 
+    // ===================== L3 + L4：AG-UI 端点 10001（全局性证明） =====================
+
+    @Test
+    @DisplayName("🔴🔴 L3/L4：AG-UI /run 缺 runId（10001，非限流码）同样恒 200 + JSON —— "
+            + "新协议端点也受 ADR-021 全局约束")
+    void aguiRunMissingRunIdKeepsJsonShapeUnderEveryAccept() throws Exception {
+        List<JsonNode> bodies = new ArrayList<>();
+        for (String accept : ACCEPT_VALUES) {
+            HttpResponse<String> response = client.send(SseRequests.realHttpPost(port,
+                            SseRequests.PATTERN_AGUI_RUN, UID, accept, null,
+                            "{\"threadId\":\"new\",\"messages\":[{\"role\":\"user\","
+                                    + "\"content\":\"hi\"}]}")
+                            .build(),
+                    HttpResponse.BodyHandlers.ofString(java.nio.charset.StandardCharsets.UTF_8));
+            JsonNode body = assertContractShape(response, accept);
+            assertEquals(ErrorCode.VALIDATION_FAILED, body.get("code").asInt(),
+                    "🔴 AG-UI 缺 runId 必须回 10001（Accept=" + accept + "）：" + response.body());
+            bodies.add(body);
+        }
+        assertAcceptInvariance(bodies);
+    }
+
     // ===================== 辅助 =====================
 
     /**

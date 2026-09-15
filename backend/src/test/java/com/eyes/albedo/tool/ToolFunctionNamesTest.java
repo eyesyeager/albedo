@@ -90,7 +90,7 @@ class ToolFunctionNamesTest {
     @DisplayName("🔴 ToolDefinition.functionName 由 toolKey 派生，且 toolKey 保持原样（对外契约标识符）")
     void definitionCarriesBothIdentifiers() {
         ToolDefinition definition = ToolDefinition.of(ToolDefinition.TYPE_MCP, "crm:lookup_user",
-                "lookup_user", "", null, "", ToolRiskPolicy.RISK_LOW, false, false, 30, 1L, null);
+                "lookup_user", "", null, "", false, 30, 1L, null);
 
         assertEquals("crm:lookup_user", definition.toolKey(),
                 "🔴 toolKey 是对外契约标识符（SSE / tool_calls / 审计都记它），不得被归一化污染");

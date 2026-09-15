@@ -17,11 +17,9 @@ import org.junit.jupiter.api.Test;
  */
 class StartupCheckerRequiredConfigTest {
 
-    /** 🔴 字面量直接照抄 api-spec §7.1.2 / architecture.md §13.6 的 25 键。 */
+    /** 🔴 字面量直接照抄 api-spec §7.1.2 / architecture.md §13.6 的 22 键（已删除确认/风险 3 键）。 */
     private static final List<String> M3_KEYS = List.of(
             "tool.max_rounds",
-            "tool.confirm_wait_seconds",
-            "tool.confirm_poll_interval_millis",
             "tool.default_timeout_seconds",
             "tool.max_timeout_seconds",
             "tool.result_max_bytes",
@@ -40,21 +38,20 @@ class StartupCheckerRequiredConfigTest {
             "observability.analytics_batch_max",
             "observability.analytics_allowed_events",
             "observability.analytics_anonymous_enabled",
-            "display.tool_risk_labels",
-            // 🔴 V1.1.3 / V1.3.2 第 23 键（① 裁决）：system 消息总长预算
+            // 🔴 V1.1.3 / V1.3.2：system 消息总长预算
             "chat.system_prompt_max_chars",
-            // 🔴 V1.1.4 #1 补登的第 24 / 25 键：埋点总开关与采样率（读取侧 fail-closed）
+            // 🔴 V1.1.4 #1：埋点总开关与采样率（读取侧 fail-closed）
             "observability.analytics_enabled",
             "observability.analytics_sample_rate");
 
     @Test
-    @DisplayName("🔴 api-spec §7.1.2 的 25 个 sys_config 键全部纳入 StartupChecker（缺键即启动失败）")
+    @DisplayName("🔴 api-spec §7.1.2 的 22 个 sys_config 键全部纳入 StartupChecker（缺键即启动失败）")
     void allM3KeysAreRequired() {
         List<String> required = StartupChecker.requiredConfigKeys();
         for (String key : M3_KEYS) {
             assertTrue(required.contains(key), "未纳入启动校验的配置键：" + key);
         }
-        assertTrue(M3_KEYS.size() == 25, "契约要求恰好 25 键，实际：" + M3_KEYS.size());
+        assertTrue(M3_KEYS.size() == 22, "契约要求恰好 22 键，实际：" + M3_KEYS.size());
     }
 
     @Test

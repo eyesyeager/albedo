@@ -80,22 +80,7 @@ public class ToolCallRecorder {
         call.setToolNameSnapshot(definition.toolName() == null ? "" : definition.toolName());
         call.setMcpId(definition.mcpId());
         call.setSchemaDigest(definition.schemaDigest() == null ? "" : definition.schemaDigest());
-        call.setRiskLevel(definition.riskLevel());
-        call.setRequiresConfirmation(definition.requiresConfirmation() ? 1 : 0);
         call.setStatus(ToolCall.STATUS_PENDING);
-        return toolCallRepository.save(call);
-    }
-
-    /**
-     * {@code pending → awaiting_confirmation}（需用户逐次确认）。
-     */
-    @Transactional(propagation = Propagation.REQUIRES_NEW)
-    public ToolCall markAwaitingConfirmation(Long toolCallId, String argsSummary) {
-        ToolCall call = lock(toolCallId);
-        ToolStateMachine.requireTransition(call.getStatus(), ToolCall.STATUS_AWAITING_CONFIRMATION);
-        call.setStatus(ToolCall.STATUS_AWAITING_CONFIRMATION);
-        call.setRequiresConfirmation(1);
-        call.setArgsSummary(argsSummary == null ? "" : argsSummary);
         return toolCallRepository.save(call);
     }
 

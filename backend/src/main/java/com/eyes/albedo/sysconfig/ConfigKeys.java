@@ -164,17 +164,11 @@ public final class ConfigKeys {
     public static final String GROUP_DISPLAY = "display";
     /** 工具调用状态展示映射（JSON，M3）。 */
     public static final String TOOL_STATUS_LABELS = "tool_status_labels";
-    /** 工具风险等级展示文案（JSON，M3；🔴 前端禁止硬编码）。 */
-    public static final String TOOL_RISK_LABELS = "tool_risk_labels";
 
     // ===== group: tool（工具编排，M3；api-spec §7.1.2） =====
     public static final String GROUP_TOOL = "tool";
     /** 单次生成的工具调用轮次上限（NUMBER），超限 → 30054。 */
     public static final String TOOL_MAX_ROUNDS = "max_rounds";
-    /** 高风险工具确认等待上限（NUMBER，秒）；超时按拒绝收敛。 */
-    public static final String TOOL_CONFIRM_WAIT_SECONDS = "confirm_wait_seconds";
-    /** 生成线程等待确认的兜底轮询间隔（NUMBER，毫秒）。 */
-    public static final String TOOL_CONFIRM_POLL_INTERVAL_MILLIS = "confirm_poll_interval_millis";
     /** 工具执行默认超时（NUMBER，秒）。 */
     public static final String TOOL_DEFAULT_TIMEOUT_SECONDS = "default_timeout_seconds";
     /** 工具执行超时上限（NUMBER，秒）；注册值越界 → 30060。 */

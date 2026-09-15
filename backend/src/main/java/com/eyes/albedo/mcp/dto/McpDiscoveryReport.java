@@ -31,7 +31,6 @@ public record McpDiscoveryReport(String mcpId,
      * @param name              上游原名
      * @param description       说明
      * @param inputSchemaDigest {@code sha256:} 前缀 + 16 hex
-     * @param riskLevel         low / medium / high（🔴 未知一律 high，租户不可下调）
      * @param granted           是否已授权
      * @param status            enabled / disabled
      * @param changeType        new / unchanged / schema_changed / removed
@@ -40,7 +39,6 @@ public record McpDiscoveryReport(String mcpId,
                                  String name,
                                  String description,
                                  String inputSchemaDigest,
-                                 String riskLevel,
                                  boolean granted,
                                  String status,
                                  String changeType) {

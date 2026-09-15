@@ -17,33 +17,6 @@ public final class AuditActions {
 
     /** 工具未授权 / 未绑定 / 已停用 / {@code tool_policy=disabled} 被模型请求调用（流式内独立短事务，result=denied）。 */
     public static final String TOOL_GRANT_DENIED = "tool.grant_denied";
-    /** 用户提交 {@code decision=allow}（confirm 请求短事务，result=success）。 */
-    public static final String TOOL_CONFIRM_ALLOWED = "tool.confirm_allowed";
-    /** 用户提交 {@code decision=deny}（confirm 请求短事务，result=denied）。 */
-    public static final String TOOL_CONFIRM_DENIED = "tool.confirm_denied";
-    /** 确认等待超过 {@code tool.confirm_wait_seconds}（由生成线程写，result=denied）。 */
-    public static final String TOOL_CONFIRM_TIMEOUT = "tool.confirm_timeout";
-    /**
-     * 🔴 <b>确认决定冲突</b>（api-spec V1.1.3 §7.8.2 ⑤ / §7.14 新增，本轮登记）。
-     *
-     * <p>触发点：同一 {@code toolCallId} 提交与既有决定<b>相反</b>的 {@code decision}（返回 {@code 30055}）。
-     * 字段契约：{@code actorType=endUser}、{@code objectType=toolCall}、{@code result=denied}、
-     * {@code errorCode=30055}；{@code beforeDigest}=既有决定、{@code afterDigest}=被拒绝的提交值
-     * （🔴 二者均为枚举字面量 {@code allow}/{@code deny}，非敏感值，可原样记）。
-     *
-     * <p>🔴 <b>为什么必须留痕</b>："用户先 allow 又 deny（或反之）"是<b>安全相关行为</b>，
-     * 且恰好发生在<b>高风险工具</b>这条最需要留痕的链路上：可能是多标签页/前端缺陷，
-     * 也可能是有人试图<b>翻转一个已生效的高风险决定</b>
-     * （例如已 allow 并执行成功后再提交 deny，制造"我没批准过"的抗辩）。不留痕等于放弃举证能力。
-     *
-     * <p>🔴 <b>防刷（不新增表、不改 DDL）</b>：同一 {@code toolCallId} <b>至多一条</b> ——
-     * 行锁内先按 {@code (tenant_id, action, object_type='toolCall', object_id)} 点查去重
-     * （{@code idx_object} 支撑），已存在则<b>跳过写入但仍返回 30055</b>。
-     * 冲突事实"发生过"即已完成留痕，重复刷同一冲突不增加信息量，却是最容易被前端重试放大的路径。
-     *
-     * <p>🔴 该路径<b>不改动</b> {@code tool_calls} 任何列（状态已是终态，改动即篡改历史并破坏 §7.11.1 聚合）。
-     */
-    public static final String TOOL_CONFIRM_CONFLICT = "tool.confirm_conflict";
     /** 保存时或每次调用前的 SSRF 校验拒绝（result=denied）。 */
     public static final String MCP_SSRF_REJECTED = "mcp.ssrf_rejected";
     /** MCP 连接测试（🔴 含成功；非流式同事务，result=success/failed）。 */
@@ -80,10 +53,6 @@ public final class AuditActions {
     /** 全部合法 action（🔴 写入前强制校验，防止拼写漂移导致 @测试 断言不到事件）。 */
     public static final Set<String> ALL = Set.of(
             TOOL_GRANT_DENIED,
-            TOOL_CONFIRM_ALLOWED,
-            TOOL_CONFIRM_DENIED,
-            TOOL_CONFIRM_TIMEOUT,
-            TOOL_CONFIRM_CONFLICT,
             MCP_SSRF_REJECTED,
             MCP_CONNECTION_TEST,
             MCP_CREDENTIAL_CHANGED,
@@ -92,10 +61,6 @@ public final class AuditActions {
             PLATFORM_ACCESS_GRANT_ISSUED,
             PLATFORM_CACHE_EVICT
     );
-
-    // ===== tool.confirm_conflict 的 reason 兜底值（api-spec §7.8.2 ⑤） =====
-    /** 调用方未给 {@code reason} 时的固定取值。 */
-    public static final String REASON_CONFLICTING_DECISION = "conflictingDecision";
 
     // ===== mcp.tool_grant_revoked 的 reason 固定枚举（api-spec §7.4.3 G3） =====
     /** Schema 变更导致已授权工具自动降级。 */

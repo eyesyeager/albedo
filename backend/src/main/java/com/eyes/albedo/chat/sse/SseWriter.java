@@ -19,7 +19,7 @@ import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
  * 因此只标记连接失效，由调用方继续完成持久化（EX-015）。
  */
 @Slf4j
-public class SseWriter {
+public class SseWriter implements StreamSink {
 
     public static final String EVENT_META = "meta";
     public static final String EVENT_DELTA = "delta";
@@ -37,6 +37,7 @@ public class SseWriter {
     /**
      * 连接是否已失效（客户端断开）。
      */
+    @Override
     public boolean broken() {
         return broken;
     }
@@ -44,6 +45,7 @@ public class SseWriter {
     /**
      * {@code meta} 事件：真实会话 ID、本次 assistant 消息 ID、Agent 版本、用户消息 ID。
      */
+    @Override
     public void meta(String conversationId, String messageId, long agentVersion, String userMessageId) {
         send(EVENT_META, new SseEvents.Meta(conversationId, messageId, agentVersion, userMessageId));
     }
@@ -51,6 +53,7 @@ public class SseWriter {
     /**
      * {@code delta} 事件：增量正文分片（前端顺序拼接，非全量）。
      */
+    @Override
     public void delta(String text) {
         send(EVENT_DELTA, SseEvents.Delta.text(text));
     }
@@ -65,6 +68,7 @@ public class SseWriter {
      * <p>🔴 思考内容走 {@code reasoning} 字段、{@code text} 恒空串：既让新前端能单独渲染折叠面板，
      * 又让只读 {@code text} 的旧前端拿到空串（不污染正文、不参与落库与标题生成）。
      */
+    @Override
     public void reasoning(String reasoning) {
         send(EVENT_DELTA, SseEvents.Delta.reasoning(reasoning));
     }
@@ -78,6 +82,7 @@ public class SseWriter {
      * <p>🔴 首字 P95 口径（§5.4.2）：{@code tool} 帧<b>也是用户可见帧</b> ——
      * "首轮即工具调用"的生成里，第一个 {@code tool} 帧就是用户感知到的首字。
      */
+    @Override
     public void tool(com.eyes.albedo.tool.dto.ToolProgress progress) {
         send(EVENT_TOOL, SseEvents.Tool.from(progress));
     }
@@ -89,6 +94,7 @@ public class SseWriter {
      * 🔴 严禁把 {@code BusinessException.getPayload()}（含 {@code violations[]}）塞进本事件 ——
      * api-spec §5.2 末条 / §8.3 A4 明令终端用户路径不得下发字段级明细。
      */
+    @Override
     public void error(int code, String message) {
         send(EVENT_ERROR, SseEvents.Error.of(code, message));
     }
@@ -98,6 +104,7 @@ public class SseWriter {
      *
      * @param title 首轮成功后生成的标题；无则为 null（契约允许 null，但字段必须存在）
      */
+    @Override
     public void done(String finishReason, String messageId, String status, String title) {
         send(EVENT_DONE, new SseEvents.Done(finishReason, messageId, status, title));
     }
@@ -105,6 +112,7 @@ public class SseWriter {
     /**
      * 心跳注释帧（无分片超过 heartbeat 秒时发送，前端忽略）。
      */
+    @Override
     public void ping() {
         if (broken) {
             return;
@@ -153,6 +161,7 @@ public class SseWriter {
     /**
      * 结束响应（必须调用，否则 Servlet 异步上下文不会释放）。
      */
+    @Override
     public void complete() {
         try {
             emitter.complete();

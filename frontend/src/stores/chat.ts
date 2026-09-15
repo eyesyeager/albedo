@@ -10,9 +10,7 @@
  *   6. M3：`tool` 帧按 `toolCallId` 原位更新；`10005` 交限流 Store 倒计时，🔴 不自动重试
  *   7. 日志分级：已被界面消费的业务错误（如 `10005`）只记 debug，网络 / 断流 / `50000+` 记 error
  *      （判定收口在 `utils/errorLevel.ts`，🔴 禁止在此散落裸码白名单）
- *   8. M3：confirm 接口回放的**服务端终态**（`toolConfirm.syncedStatus`）原位写回工具调用 ——
- *      SSE 已断开时这是唯一的收敛点（BUG-MCP-003）；🔴 判定条件不在此重复实现
- *   9. M3.1：`10005`（秒级自愈）与 `30070`（当日不可恢复）分别交给
+ *   8. M3.1：`10005`（秒级自愈）与 `30070`（当日不可恢复）分别交给
  *      `rateLimitStore` / `quotaStore`，🔴 严禁互相复用状态；`done` 之后重取额度权威快照
  */
 import { defineStore } from 'pinia'
@@ -30,7 +28,6 @@ import { trackMessageSend } from '@/utils/chatAnalytics'
 import { loadConversationSnapshot } from '@/utils/chatHistory'
 import { createAssistantPlaceholder, createUserMessage } from '@/utils/chatMessage'
 import {
-  applyToolCallStatus,
   cancelPendingToolCalls,
   findByClientId as findInList,
   patchMessage,
@@ -53,14 +50,12 @@ import { useConfigStore } from './config'
 import { useConversationStore } from './conversation'
 import { useQuotaStore } from './quota'
 import { useRateLimitStore } from './rateLimit'
-import { useToolConfirmStore } from './toolConfirm'
 
 export const useChatStore = defineStore('chat', () => {
   const configStore = useConfigStore()
   const conversationStore = useConversationStore()
   const quotaStore = useQuotaStore()
   const rateLimitStore = useRateLimitStore()
-  const toolConfirmStore = useToolConfirmStore()
 
   const conversationId = ref<string | null>(null)
   const conversation = ref<Conversation | null>(null)
@@ -108,7 +103,6 @@ export const useChatStore = defineStore('chat', () => {
     messages.value = []
     historyError.value = null
     lastSend.value = null
-    toolConfirmStore.reset()
     resetAnnouncements()
     if (target === null || !isLoggedIn()) {
       return
@@ -205,14 +199,12 @@ export const useChatStore = defineStore('chat', () => {
     const target = streamingClientId === null ? undefined : findByClientId(streamingClientId)
     const clientId = target?.clientId ?? ''
     const messageId = target?.messageId ?? ''
-    toolConfirmStore.markStopping()
     abortStream()
     // 先本地落定，保证「停止后 ≤1s 不再追加」在网络异常时同样成立（AC-CHAT-002）
     if (clientId.length > 0) {
       patch(clientId, { status: 'stopped', streaming: false, finishReason: 'stopped' })
     }
     if (clientId.length === 0 || messageId.length === 0) {
-      toolConfirmStore.clearStopping()
       return
     }
     try {
@@ -225,8 +217,6 @@ export const useChatStore = defineStore('chat', () => {
       }
     } catch (e: unknown) {
       console.error('[chat] 停止生成失败', e)
-    } finally {
-      toolConfirmStore.clearStopping()
     }
     void syncConversation()
   }
@@ -238,7 +228,6 @@ export const useChatStore = defineStore('chat', () => {
     messages.value = []
     historyError.value = null
     lastSend.value = null
-    toolConfirmStore.reset()
     resetAnnouncements()
   }
 
@@ -298,7 +287,6 @@ export const useChatStore = defineStore('chat', () => {
         //    会被错记进"工具之后的下一轮"，时间线顺序即刻错位。
         flushStreamBuffers()
         roundSealed = true
-        toolConfirmStore.observe(call)
       },
       onRateLimited: (retryAfterSeconds) => rateLimitStore.start(retryAfterSeconds),
       onFinished: () => {
@@ -387,26 +375,6 @@ export const useChatStore = defineStore('chat', () => {
   function patch(clientId: string, changes: Partial<ChatMessageView>): void {
     patchMessage(messages.value, clientId, changes)
   }
-
-  /**
-   * confirm 响应回放的服务端终态 → 原位收敛工具卡片（BUG-MCP-003）。
-   *
-   * 🔴 为什么必须有这条兜底：SSE 可能已因整体超时/取消提前关闭，
-   * 该 `toolCallId` 不会再有 `tool` 帧，卡片会永久停在"正在提交你的决定…"。
-   * 🔴 入表条件已在 `toolConfirm.syncReplayedTerminal` 收口（仅 `replayed=true` 的终态），
-   * 本处只负责写回消息列表，🔴 不做第二套判定、不改写已到达的终态（由 `applyToolCallStatus` 保证）。
-   */
-  watch(
-    () => toolConfirmStore.syncedStatus,
-    (synced) => {
-      Object.entries(synced).forEach(([toolCallId, status]) => {
-        const applied = applyToolCallStatus(messages.value, toolCallId, status)
-        if (applied !== null) {
-          patch(applied.clientId, { toolCalls: applied.toolCalls })
-        }
-      })
-    },
-  )
 
   return {
     conversationId,

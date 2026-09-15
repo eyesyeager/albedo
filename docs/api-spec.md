@@ -1,7 +1,7 @@
 # Albedo 接口契约（API Spec）
 
-**版本**：V1.2.7
-**日期**：2026-08-18
+**版本**：V1.3.0
+**日期**：2026-08-24
 **维护人**：@架构设计师（唯一维护人）
 **上游基线**：`docs/prd.md` **V1.4**、`docs/requirements.md` V1.2、`docs/architecture.md` **V1.4.8**、《团队协作基础框架 v3.1》§十四
 
@@ -144,7 +144,6 @@
 | `POST /api/v1/conversations` | 请求头 `Idempotency-Key: <uuid>`（**必填**）；Redis `SETNX` 去重，命中返回原结果 |
 | `POST /api/v1/conversations/{id}/messages` | 请求头 `Idempotency-Key: <uuid>`（**必填**）；命中则**不重复创建用户消息**，返回原 assistant 消息的流或最终态（EX-013） |
 | `POST /api/v1/messages/{id}/regenerate` | 请求头 `Idempotency-Key: <uuid>`（**必填**） |
-| `POST /api/v1/messages/{messageId}/tool-calls/{toolCallId}/confirm` | 🔴 **不使用** `Idempotency-Key`（传入也忽略），由**资源状态机 + `tool_calls` 行锁**保证：重复提交同一 `decision` → `code=0` 回放原结果（`data.replayed=true`）；提交相反 `decision` → `30055`（完整状态机见 **§7.8.2**） |
 | `POST /api/v1/events` | 由 `clientEventId` 唯一约束去重（`uk(tenant_id, client_event_id)`），重复上报静默丢弃且计入 `data.duplicated`（见 §7.10.1） |
 | `POST /api/v1/platform/cache/evict` | 天然幂等（重复失效同一作用域结果一致），但**每次调用都必须独立审计**（见 §7.2.1） |
 | 其他写接口 | 通过资源自身唯一约束 / 乐观锁 `expectedVersion` 保证 |
@@ -219,7 +218,6 @@
 | `30052` | `MCP_UNAVAILABLE` | MCP 连接 / 传输 / 协议不兼容 / 鉴权失败 / 服务不可用 | 展示不可用语义 | M3 |
 | `30053` | `TOOL_ARGS_INVALID` | 工具入参不符合已注册 JSON Schema（本地 Tool 校验失败；MCP `tools/call` 返回 JSON-RPC `-32602`） | 展示参数错误语义，**不重试同参** | M3 |
 | `30054` | `TOOL_LOOP_LIMIT_EXCEEDED` | 单次生成的工具调用轮次超过 `sys_config: tool.max_rounds` | 展示"已达调用上限"，可重新提问 | M3 |
-| `30055` | `TOOL_CONFIRM_CONFLICT` | 同一 `toolCallId` 提交与既有决定**相反**的 `decision`（状态机见 §7.8.2） | 以服务端既有决定为准刷新工具卡片，**不重试** | M3 |
 | `30056` | `TOOL_RETRY_BLOCKED` | 非幂等工具结果未知，禁止自动重试（EX-019 / AC-TOL-003） | 展示"结果待确认"，仅允许用户显式重新提问 | M3 |
 | `30057` | `TOOL_EXECUTION_FAILED` | 工具执行返回业务失败（MCP `result.isError=true`；本地 Tool 抛业务异常），非超时、非鉴权、非参数错误 | 展示工具失败语义 | M3 |
 | `30060` | `RUNTIME_CONFIG_INVALID` | Agent/Skill/MCP/Tool 配置或引用链非法（独立校验入口与运行时兜底共用）；`data.violations[]` 给出字段级失败 | 展示配置异常，**禁止白屏/NPE** | M2-min |
@@ -757,19 +755,17 @@ data: {"finishReason":"stop"}
 | | `userMessageId` | string | M1 | 本次保存的用户消息 ID（`regenerate` 场景为原用户消息 ID） |
 | `delta` | `text` | string | M1 | 文本分片（增量，非全量；前端顺序拼接）。🔴 **只承载正文** —— 思考过程走同帧的 `reasoning` 字段，此处恒为空串 |
 | | `reasoning` | string \| null | **V1.1.6** | 推理型模型（如 `hunyuan-a13b`）的**思维链增量**。🔴 与 `text` **互斥承载**：正文帧 `text=正文, reasoning=null`；思考帧 `text="", reasoning=思维链`。🔴 **V1.1.7 起落库**至 `messages.reasoning`（独立列），历史会话经 §4.5.6 回显 |
-| `tool` | `toolCallId` | string | M3 | 工具调用 ID；confirm 接口路径参数 |
+| `tool` | `toolCallId` | string | M3 | 工具调用 ID（string，全生命周期稳定） |
 | | `toolType` | string | M3 | `local` \| `mcp` |
 | | `toolKey` | string | M3 | 工具标识（租户内唯一；MCP 工具为 `{mcpKey}:{toolName}`） |
-| | `riskLevel` | string | M3 | `low` \| `medium` \| `high`（展示文案取 `sys_config: display.tool_risk_labels`） |
-| | `status` | string | M3（V1.0 已声明） | `pending` \| `awaiting_confirmation` \| `running` \| `succeeded` \| `failed` \| `timed_out` \| `cancelled` \| `denied` |
+| | `status` | string | M3（V1.0 已声明） | `pending` \| `running` \| `succeeded` \| `failed` \| `timed_out` \| `cancelled` \| `denied` |
 | | `round` | number | M3 | 第几轮工具调用，从 1 开始；上限 `sys_config: tool.max_rounds` |
-| | `summary` | string | M3（V1.0 已声明） | 🔴 **兼容字段，永久保留**：当前阶段的可展示摘要（`awaiting_confirmation`/`pending`/`running` 时等于 `argsSummary`，终态时等于 `resultSummary`）。V1.0 已声明该字段，只读它的前端实现必须能继续正常工作 |
+| | `summary` | string | M3（V1.0 已声明） | 🔴 **兼容字段，永久保留**：当前阶段的可展示摘要（`pending`/`running` 时等于 `argsSummary`，终态时等于 `resultSummary`）。V1.0 已声明该字段，只读它的前端实现必须能继续正常工作 |
 | | `argsSummary` | string | M3 | 入参**脱敏摘要**（脱敏规则见 §5.4.3），截断阈值 `sys_config: tool.args_summary_max_chars` |
 | | `resultSummary` | string | M3 | 结果**脱敏摘要**，截断阈值 `sys_config: tool.result_summary_max_chars`；被截断时以 `…` 结尾且 `truncated=true` |
 | | `truncated` | boolean | M3 | 结果是否被截断（原始结果超 `sys_config: tool.result_max_bytes`，EX-017） |
 | | `errorCode` | number \| null | M3 | 终态为 `failed`/`timed_out`/`denied` 时的**数字业务码**（`30050`~`30057`、`50003`）；否则 `null` |
 | | `retryAfterSeconds` | number \| null | M3 | 仅在因限流导致工具调用被拒时给出剩余等待秒数；否则 `null` |
-| | **`confirmExpiresInSeconds`** | number \| null | **V1.2.2** | 🔴 **本次确认的实际剩余等待秒数**，仅在 `status=awaiting_confirmation` 帧非空，其余状态恒 `null`。<br>🔴 **为什么必须新增**：确认等待上限自 V1.2.2 起被**单次生成总预算**收紧为 `min(sys_config: tool.confirm_wait_seconds, 剩余预算 − 宽限)`（§7.8.1 ④ / `architecture.md` ADR-017 ③ⓑ）—— 前端若继续按 `sys_config` 值显示倒计时就会**骗人**（显示 120s 而 30s 后即 `timed_out`）。<br>🔴 **前端消费规则**：优先用本字段；`null` / 字段缺失时回退 `sys_config: tool.confirm_wait_seconds`（🔴 旧前端零破坏，符合 §5.4.1 第 1/5 条）。<br>🔴 服务端保证：该值 ≥1；若剩余预算已不足以等待（`剩余 − 宽限 ≤ 0`），🔴 **根本不下发** `awaiting_confirmation` 帧（不发一张必然超时的确认卡），本次生成直接以 `done(timeout)` 收敛 |
 | `error` | `code` | number | M1 | **数字业务码**（登记表内，如 `50002`/`30052`/`30054`） |
 | | `message` | string | M1 | 可展示语义（禁含内部地址/堆栈/密钥） |
 | | `retryAfterSeconds` | number \| null | M3 | 🔴 **字段恒存在**（V1.1.5 G-3 追认，由原"可选"改为必带）：`code=10005` 时为剩余等待秒数，其余一律 `null`（AC-LMT-001）。🔴 一期 SSE 内 `10005` 不可达（§7.12），故实测恒 `null` |
@@ -778,7 +774,7 @@ data: {"finishReason":"stop"}
 | | `status` | string | M1 | 最终持久化状态：`completed` \| `stopped` \| `failed` |
 | | `title` | string \| null | M1 | 首轮成功后生成的会话标题（否则 `null`） |
 
-> 🔴 `tool.status` 使用 **snake_case 枚举值**（`awaiting_confirmation`/`timed_out`），与 PRD §10.5 的 camelCase 表述等价，**以本表为实现基线**。
+> 🔴 `tool.status` 使用 **snake_case 枚举值**（`timed_out`），与 PRD §10.5 的 camelCase 表述等价，**以本表为实现基线**。
 
 > 🔴 **V1.2.2 新增（ADR-017）`done.finishReason = "timeout"` 的完整触发口径（🔴 零新错误码）**：
 > 本取值自 M1 起即已登记，V1.2.2 把它的**触发集合**明确为**两类，二者同码同 `finishReason`**：
@@ -948,6 +944,81 @@ data: {"finishReason":"stop","messageId":"5002","status":"completed","title":"�
 6. 🔴 脱敏后的摘要同时用于：SSE tool 事件、tool_calls 落库、审计 beforeDigest/afterDigest、
    §7.9.1 查询接口 —— 四处使用同一份摘要，不存在"落库明文、下发脱敏"的双轨
 ```
+
+### 5.5 AG-UI 协议（🔴 彻底替换自定义 SSE 契约）
+
+> 🔴 **本节登记"彻底替换为 AG-UI 协议"的迁移契约**。自定义 SSE（§5.1~§5.4）与 AG-UI
+> 两端点在迁移期内并存；新客户端一律走 AG-UI 端点 `POST /api/v1/agui/run`。
+
+#### 5.5.1 传输格式（与 §5.1 的差异）
+
+AG-UI 事件类型**内嵌在 `data` JSON 的 `type` 字段**（PascalCase），**不使用** SSE 的 `event:` 行：
+
+```
+data: {"type":"RUN_STARTED","threadId":"1001","runId":"5002","input":{"conversationId":"1001"}}
+
+data: {"type":"TEXT_MESSAGE_CONTENT","messageId":"5002","delta":"你好"}
+
+data: {"type":"RUN_FINISHED","outcome":{"type":"success"}}
+
+```
+
+- 事件顺序：`RUN_STARTED` → (`TEXT_MESSAGE_*` | `REASONING_*` | `TOOL_CALL_*` | `CUSTOM`)\* → `RUN_FINISHED` \| `RUN_ERROR`
+- `RUN_STARTED` 在**首个模型分片之前立即 flush**（同 §5.1 的 `meta` 义务，规避代理缓冲）
+- 🔴 **`RUN_FINISHED` / `RUN_ERROR` 必发其一**（等价 §5.1「`done 必发`」），前提同为"流已建立"
+- 🔴 建流前失败仍走 §4.6.1 两段式 **HTTP 200 + `application/json`**（ADR-021 全局约束不变）
+- 心跳仍为注释帧 `: ping`（前端忽略，同 §5.1）
+
+#### 5.5.2 请求体 `RunAgentInput`
+
+```json
+{
+  "threadId": "1001",
+  "runId": "idem-key-1",
+  "messages": [{"role": "user", "content": "你好"}],
+  "tools": [],
+  "context": [],
+  "forwardedProps": {"agentId": "..."},
+  "resume": []
+}
+```
+
+| 字段 | 类型 | 说明 |
+|---|---|---|
+| `threadId` | string | 会话 ID（映射 conversationId）；`"new"` 表示原子新建会话 |
+| `runId` | string | 本次运行 ID，🔴 也是幂等键（等价 §1.4 `Idempotency-Key`） |
+| `messages` | array | 对话消息；🔴 本项目仅取最后一条 `role=user` 的 `content` 作为本次输入 |
+| `forwardedProps.agentId` | string | `"new"` 场景下指定 Agent |
+| `forwardedProps.regenerateMessageId` | string | 🔴 重新生成语义：传此字段即走 `regenerate` 路径（不重复保存用户消息） |
+| `resume` | array | 🔴 工具确认中断恢复（见 §5.5.4） |
+
+> 🔴 **历史会话回显仍走 REST**（§4.5.6），AG-UI 只管流式增量 —— 迁移契约明确：不发 `MESSAGES_SNAPSHOT` 回放历史。
+
+#### 5.5.3 事件映射（自定义 SSE ↔ AG-UI）
+
+| 自定义 SSE（旧） | AG-UI（新） | 说明 |
+|---|---|---|
+| `meta` | `RUN_STARTED` | `threadId`=conversationId、`runId`=assistantMessageId、`input` 承载 agentVersion/userMessageId |
+| `delta(text)` | `TEXT_MESSAGE_START` + `TEXT_MESSAGE_CONTENT`\* + `TEXT_MESSAGE_END` | 首片先发 START，末片由收尾自动补 END |
+| `delta(reasoning)` | `REASONING_START` + `REASONING_MESSAGE_START` + `REASONING_MESSAGE_CONTENT`\* + `REASONING_MESSAGE_END` + `REASONING_END` | 思维链独立通道 |
+| `tool`（状态流转） | `TOOL_CALL_START` + `TOOL_CALL_ARGS` + `TOOL_CALL_END` + `CUSTOM("tool_progress")` + `TOOL_CALL_RESULT`(终态) | 🔴 完整状态机信息（riskLevel/status/confirmExpiresInSeconds 等）经 `CUSTOM("tool_progress")` 承载，标准工具事件只作骨架 |
+| `error` + `done(failed)` | `CUSTOM("completion")` + `RUN_ERROR` | `completion` 透传 finishReason/status/title/errorCode |
+| `done`（成功/停止） | `CUSTOM("completion")` + `RUN_FINISHED` | `completion` 透传 finishReason/status/title |
+
+> 🔴 **`CUSTOM("tool_progress")` 的 value 字段与 §5.2 的 `tool` 事件 12 字段完全一致**（含 `confirmExpiresInSeconds`），
+> 前端翻译层据此重建等价内部事件，保证确认倒计时、风险标签等既有展示能力零退化。
+> 🔴 **`CUSTOM("completion")` 的 value 字段**：`finishReason` / `messageId` / `status` / `title` / `errorCode` / `errorMessage`。
+
+#### 5.5.4 工具确认交互（interrupt/resume，🔴 决策已定、实现待落地）
+
+> 🔴 **目标态**（决策 3）：工具需确认时，后端发 `RUN_FINISHED(outcome=interrupt, interrupts=[toolCallId])`
+> **结束当前 Run**；用户确认后以新 Run 携带 `resume=[{interruptId, status: resolved|cancelled}]` 恢复执行。
+>
+> ⚠️ **当前实现态**（过渡）：确认等待仍为"同流内阻塞等待"（ADR-008/010/017 既有的成熟机制），
+> `awaiting_confirmation` 状态经 `CUSTOM("tool_progress")` 下发、confirm 接口唤醒 —— 行为与旧契约等价，
+> 仅帧格式迁移。**interrupt/resume 的跨 Run 状态持久化恢复属独立架构变更**（触及
+> `ToolOrchestrator` 执行循环的挂起/恢复、`ToolConfirmRegistry` 阻塞原语、生成上下文的序列化），
+> 需单独 ADR 裁决后再实施，不在本次协议迁移范围内。
 
 ---
 
@@ -3661,6 +3732,7 @@ resetsAt   = localDate.plusDays(1).atStartOfDay(zone).toInstant()
 
 | 版本 | 日期 | 变更 |
 |---|---|---|
+| **V1.3.0** | **2026-08-24** | **🔴 删除「工具调用确认」与「工具风险等级」功能（产品决策：工具直接自动执行，风险等级机制一并移除；🔴 删除 1 个接口、1 个错误码、3 个 `sys_config` 键、4 个 audit action、多个 DDL 列）：**<br>① **🔴 §7.1.1 接口总表删除第 9 行** `POST /api/v1/messages/{messageId}/tool-calls/{toolCallId}/confirm`（工具确认接口整体移除，§7.8.2 确认契约随之一并作废）<br>② **🔴 §2.1/§2.2 删除错误码 `30055 TOOL_CONFIRM_CONFLICT`**（确认冲突码随功能删除；🔴 错误码序号**不复用**，`30054` 与 `30056` 之间留空）<br>③ **🔴 §7.1.2 删除 3 个 `sys_config` 键**：`tool.confirm_wait_seconds` / `tool.confirm_poll_interval_millis` / `display.tool_risk_labels`（键总数 35 → **32**；`StartupChecker.REQUIRED_CONFIG` 同步移除）<br>④ **🔴 §7.14 删除 4 个 audit action**：`tool.confirm_allowed` / `tool.confirm_denied` / `tool.confirm_timeout` / `tool.confirm_conflict`（action 总数 12 → **8**）<br>⑤ **🔴 §7.8.1 状态机删除 `awaiting_confirmation` 状态**（状态总数 8 → **7**）：`pending → running | denied | failed | cancelled`，删除 `awaiting_confirmation → …` 全部流转；`timed_out` 语义收窄为**仅**执行超时（`30051`/`30056`），删除"确认等待超时 `30050`"语义<br>⑥ **🔴 §7.7.1/§7.7.3 删除 `riskLevel` 字段与风险矩阵**：`local_tools.risk_level` / `mcp_tools.risk_level` / `tool_calls.risk_level` / `tool_calls.requires_confirmation` / `tool_calls.decision` / `tool_calls.decided_by_uid` / `tool_calls.decided_at` 共 **7 列删除**；工具策略退化为二元判断（`tool_policy != 'disabled'` 即进清单，`confirm` 取值兼容存量数据、语义等价 `auto`）<br>⑦ **🔴 §5.2 `tool` 事件删除 `riskLevel` / `confirmExpiresInSeconds` 字段**（字段 12 → **10**）；`CUSTOM("tool_progress")` 的 value 同步删除这两字段<br>⑧ **🔴 DDL 变更**：`tool_calls` 表删除 `risk_level` / `requires_confirmation` / `decision` / `decided_by_uid` / `decided_at` 列；`local_tools` / `mcp_tools` 删除 `risk_level` 列（`ddl-auto: validate` 下多余列可先行保留，物理删除由 DBA 执行）<br>⑨ **🔴 语义变更（删除确认后的行为）**：原本需确认的工具（`high` 风险 / `confirm` 策略下的 `medium`）改为**直接自动执行**；工具执行流程中的"等待用户确认"步骤整体移除，`ToolOrchestrator` 校验顺序由 ⑦ 步收窄为 ⑥ 步（删除「风险 × toolPolicy 判定」步）<br>⑩ **自查结论**：本版**零新增**接口/错误码/键/action；`done 必发`、响应体四字段、租户隔离、反硬编码、deadline 预算制、单一前导 `system` 六条红线**全部未放宽**；SSE 事件名仍恰 5 个（`meta`/`delta`/`tool`/`error`/`done`） |
 | V1.0 | 2026-08-12 | 首版：通用约定、错误码登记表、M1 全量接口、SSE 事件契约、M2/M3 路径占位 |
 | V1.0.1 | 2026-08-12 | M1 回归遗留处置：§4.2.1 增加 `/site/status` 路径易误用警告（不带 `/api/v1` 前缀，误用会得到 `10004`） |
 | **V1.1** | **2026-08-13** | **M2-min + M3 正式契约落地（本版），@后端 可据 §7 实现：**<br>① **修复自相矛盾**：§1.4 confirm 行的悬挂引用（原指向一个并不存在的章节编号）改为 §7.8.2，路径与 §7 统一为 `/api/v1/messages/{messageId}/tool-calls/{toolCallId}/confirm`<br>② **错误码闭合**：§2.2 正式登记 `30053`/`30054`/`30055`/`30056`/`30057`/`30060`/`30061`，与 §2.1 子段「已用」列逐一对应；`10005` 明确 `data.retryAfterSeconds` 必填<br>③ **§7 由占位升级为正式契约**：新增 `POST /api/v1/platform/cache/evict`、`POST /api/v1/admin/config/validate`、`GET/POST /api/v1/admin/mcp/{mcpId}[/test|/discover]`、`POST /api/v1/messages/{messageId}/tool-calls/{toolCallId}/confirm`、`GET /api/v1/conversations/{conversationId}/tool-calls`、`POST /api/v1/events`、`GET /api/v1/admin/metrics/usage` 的完整字段契约、错误码清单与 REQ/AC 追溯；补 Skill 运行时消费契约（无对外接口）、MCP JSON-RPC 与传输取舍、本地 Tool 注册/授权/风险矩阵、内置 Mock MCP、§7.1.2 新增 22 个 `sys_config` 键<br>④ **§5 SSE 扩展**：`tool` 事件新增 `riskLevel`/`round`/`argsSummary`/`resultSummary`/`truncated`/`errorCode`/`retryAfterSeconds`，`error` 新增 `retryAfterSeconds`；新增 §5.4 向后兼容硬约束、多轮工具时序示例、摘要脱敏规则；`tool.summary` 永久保留<br>⑤ **§6 标注 Boss 决策**：M2 管理后台全量 Deferred 至二期，新增「一期状态」列并标注已提升为 M2-min 的条目<br>⑥ **§8 增补 M2-min/M3 核对项**：工具事件字段、confirm 幂等语义、埋点白名单、租户隔离、SSRF 运行时兜底、审计不阻断 SSE、缓存 L1+L2 成对失效<br>⑦ **§7.14 固化事务边界**：非流式安全操作同事务（失败关闭，EX-024）；流式内安全事件独立短事务，审计失败使该次工具调用失败但**绝不中断 SSE** |

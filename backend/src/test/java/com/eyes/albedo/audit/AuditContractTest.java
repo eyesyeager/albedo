@@ -16,18 +16,12 @@ import org.junit.jupiter.api.Test;
 class AuditContractTest {
 
     @Test
-    @DisplayName("AC-AUD-003：action 枚举与 api-spec §7.14 的 12 项逐字一致"
-            + "（V1.1.2 新增 mcp.tool_grant_revoked；V1.1.3 新增 tool.confirm_conflict）")
+    @DisplayName("AC-AUD-003：action 枚举与 api-spec §7.14 的 8 项逐字一致"
+            + "（已删除工具确认相关 4 项 action）")
     void actionEnumMatchesContract() {
         // 🔴 字面量直接照抄 api-spec §7.14 表格，避免"用常量校验常量"的空转
         Set<String> expected = Set.of(
                 "tool.grant_denied",
-                "tool.confirm_allowed",
-                "tool.confirm_denied",
-                "tool.confirm_timeout",
-                // 🔴 V1.1.3（⑤ 裁决）：决定冲突（30055）必须留痕 ——
-                //    "翻转一个已生效的高风险决定"是安全相关行为，不留痕等于放弃举证能力
-                "tool.confirm_conflict",
                 "mcp.ssrf_rejected",
                 // 🔴 V1.1.2（G3 裁决）：系统主动撤销授权，与"模型请求调用被拒"语义不同
                 "mcp.tool_grant_revoked",
@@ -38,10 +32,9 @@ class AuditContractTest {
                 "platform.cache_evict");
 
         assertEquals(expected, AuditActions.ALL, "action 枚举必须与契约完全一致，无多无缺");
-        assertEquals(12, AuditActions.ALL.size());
+        assertEquals(8, AuditActions.ALL.size());
         assertTrue(AuditActions.isRegistered(AuditActions.PLATFORM_CACHE_EVICT));
         assertTrue(AuditActions.isRegistered(AuditActions.MCP_TOOL_GRANT_REVOKED));
-        assertTrue(AuditActions.isRegistered(AuditActions.TOOL_CONFIRM_CONFLICT));
         assertFalse(AuditActions.isRegistered("tool.something_new"), "未登记 action 必须被拒绝");
         assertFalse(AuditActions.isRegistered(null));
     }

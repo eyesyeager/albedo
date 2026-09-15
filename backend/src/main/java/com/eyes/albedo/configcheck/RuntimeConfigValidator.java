@@ -549,11 +549,6 @@ public class RuntimeConfigValidator {
             ctx.violate(type, tool.getId(), "toolKey", ConfigViolationDTO.RULE_FORMAT,
                     "工具键必须形如 {mcpKey}:{toolName}");
         }
-        if (!Set.of(McpTool.RISK_LOW, McpTool.RISK_MEDIUM, McpTool.RISK_HIGH)
-                .contains(tool.getRiskLevel())) {
-            ctx.violate(type, tool.getId(), "riskLevel", ConfigViolationDTO.RULE_ENUM,
-                    "风险等级取值必须是 low / medium / high");
-        }
         validateJsonSchema(ctx, type, tool.getId(), "inputSchema", tool.getInputSchema(), false);
         // 🔴 已授权但所属服务被停用：运行时会拒绝（30050），提前以 warning 暴露给 DBA
         if (tool.grantedAndEnabled() && !McpServer.STATUS_ENABLED.equals(server.getStatus())) {
@@ -578,11 +573,6 @@ public class RuntimeConfigValidator {
         // 🔴 input_schema 必须是 draft 2020-12 且根类型 object（api-spec §7.7.1）
         validateJsonSchema(ctx, type, tool.getId(), "inputSchema", tool.getInputSchema(), true);
 
-        if (!Set.of(LocalTool.RISK_LOW, LocalTool.RISK_MEDIUM, LocalTool.RISK_HIGH)
-                .contains(tool.getRiskLevel())) {
-            ctx.violate(type, tool.getId(), "riskLevel", ConfigViolationDTO.RULE_ENUM,
-                    "风险等级取值必须是 low / medium / high");
-        }
         int maxTimeout = businessConfig.requireInt(ConfigKeys.GROUP_TOOL,
                 ConfigKeys.TOOL_MAX_TIMEOUT_SECONDS);
         Integer timeout = tool.getTimeoutSeconds();

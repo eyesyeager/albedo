@@ -67,9 +67,6 @@ public class ToolCall extends BaseTenantEntity {
     @Column(name = "schema_digest", nullable = false, length = 80)
     private String schemaDigest = "";
 
-    @Column(name = "risk_level", nullable = false, length = 16)
-    private String riskLevel = LocalTool.RISK_HIGH;
-
     /** 见 {@link #STATUS_PENDING} 等常量（api-spec §7.8.1 枚举全列）。 */
     @Column(name = "status", nullable = false, length = 32)
     private String status = STATUS_PENDING;
@@ -77,19 +74,6 @@ public class ToolCall extends BaseTenantEntity {
     /** 🔴 只允许已登记数字业务码，禁止字符串码。 */
     @Column(name = "error_code")
     private Integer errorCode;
-
-    @Column(name = "requires_confirmation", nullable = false, columnDefinition = "tinyint")
-    private Integer requiresConfirmation = 0;
-
-    /** allow / deny。 */
-    @Column(name = "decision", length = 16)
-    private String decision;
-
-    @Column(name = "decided_by_uid")
-    private Long decidedByUid;
-
-    @Column(name = "decided_at")
-    private Instant decidedAt;
 
     /** 🔴 脱敏摘要，禁存完整入参。 */
     @Column(name = "args_summary", nullable = false, length = 1024)
@@ -115,23 +99,21 @@ public class ToolCall extends BaseTenantEntity {
     // ===== 状态机（api-spec §7.8.1，🔴 枚举全列，终态不可再迁移） =====
     /** 模型请求调用，已落库待校验。 */
     public static final String STATUS_PENDING = "pending";
-    /** 需确认，等待用户决定（等待上限 {@code tool.confirm_wait_seconds}）。 */
-    public static final String STATUS_AWAITING_CONFIRMATION = "awaiting_confirmation";
     /** 已允许且开始执行。 */
     public static final String STATUS_RUNNING = "running";
     /** 终态：执行成功（含结果被截断）。 */
     public static final String STATUS_SUCCEEDED = "succeeded";
     /** 终态：执行失败（30052/30053/30057/50003）。 */
     public static final String STATUS_FAILED = "failed";
-    /** 终态：确认等待超时（30050）或执行超时（30051/30056）。 */
+    /** 终态：执行超时（30051/30056）。 */
     public static final String STATUS_TIMED_OUT = "timed_out";
     /** 终态：用户停止生成或会话被删除（EX-022）。 */
     public static final String STATUS_CANCELLED = "cancelled";
-    /** 终态：用户拒绝 / 未授权 / 未绑定 / SSRF 拒绝（30050）。 */
+    /** 终态：未授权 / 未绑定 / SSRF 拒绝（30050）。 */
     public static final String STATUS_DENIED = "denied";
 
     public static final java.util.Set<String> ALL_STATUSES = java.util.Set.of(
-            STATUS_PENDING, STATUS_AWAITING_CONFIRMATION, STATUS_RUNNING, STATUS_SUCCEEDED,
+            STATUS_PENDING, STATUS_RUNNING, STATUS_SUCCEEDED,
             STATUS_FAILED, STATUS_TIMED_OUT, STATUS_CANCELLED, STATUS_DENIED);
 
     public static final java.util.Set<String> TERMINAL_STATUSES = java.util.Set.of(
@@ -139,9 +121,6 @@ public class ToolCall extends BaseTenantEntity {
 
     public static final String TOOL_TYPE_LOCAL = "local";
     public static final String TOOL_TYPE_MCP = "mcp";
-
-    public static final String DECISION_ALLOW = "allow";
-    public static final String DECISION_DENY = "deny";
 
     public boolean terminal() {
         return TERMINAL_STATUSES.contains(status);

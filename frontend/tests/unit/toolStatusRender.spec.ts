@@ -10,7 +10,7 @@ import { toolStatusIcon, toolStatusTone } from '@/utils/toolVisual'
 import { setupPinia } from './helpers'
 
 /**
- * 8 种工具状态的可辨识渲染（design-system.md §14.2.2）。
+ * 7 种工具状态的可辨识渲染（design-system.md §14.2.2）。
  *
  * 🔴 核心断言：状态**不只靠颜色**表达 —— 每种状态都必须同时具备
  * ① 可读文字（来自 sys_config 或 locales），② 与状态一一对应的图标组件。
@@ -22,7 +22,6 @@ function call(status: string, overrides: Partial<ToolCallSummary> = {}): ToolCal
     toolType: 'mcp',
     toolKey: 'weather:query',
     status,
-    riskLevel: 'low',
     round: 1,
     summary: '',
     argsSummary: 'city=上海',
@@ -34,10 +33,9 @@ function call(status: string, overrides: Partial<ToolCallSummary> = {}): ToolCal
   }
 }
 
-/** 契约要求的 8 种状态，一个不能少。 */
+/** 契约要求的 7 种状态，一个不能少。 */
 const EXPECTED_STATUSES: readonly ToolCallStatus[] = [
   'pending',
-  'awaiting_confirmation',
   'running',
   'succeeded',
   'failed',
@@ -46,12 +44,12 @@ const EXPECTED_STATUSES: readonly ToolCallStatus[] = [
   'denied',
 ]
 
-describe('工具状态视觉映射 · 8 态齐全', () => {
-  it('状态枚举恰好为契约定义的 8 种', () => {
+describe('工具状态视觉映射 · 7 态齐全', () => {
+  it('状态枚举恰好为契约定义的 7 种', () => {
     expect([...TOOL_CALL_STATUSES]).toEqual([...EXPECTED_STATUSES])
   })
 
-  it('每种状态都有专属图标，8 种图标互不重复（🔴 不靠颜色区分）', () => {
+  it('每种状态都有专属图标，7 种图标互不重复（🔴 不靠颜色区分）', () => {
     const icons = EXPECTED_STATUSES.map((status) => toolStatusIcon(status))
 
     expect(new Set(icons).size).toBe(EXPECTED_STATUSES.length)
@@ -66,7 +64,6 @@ describe('工具状态视觉映射 · 8 态齐全', () => {
 
   it('色调映射符合 design-system §14.2.2 的语义分配', () => {
     expect(toolStatusTone('pending')).toBe('neutral')
-    expect(toolStatusTone('awaiting_confirmation')).toBe('warning')
     expect(toolStatusTone('running')).toBe('running')
     expect(toolStatusTone('succeeded')).toBe('success')
     expect(toolStatusTone('failed')).toBe('danger')
@@ -82,10 +79,7 @@ describe('工具状态视觉映射 · 8 态齐全', () => {
 })
 
 describe('ToolCallBar · 状态渲染不只靠颜色', () => {
-  // awaiting_confirmation 走确认卡，不使用普通状态条（design-system §14.2.2）
-  const BAR_STATUSES = EXPECTED_STATUSES.filter((status) => status !== 'awaiting_confirmation')
-
-  BAR_STATUSES.forEach((status) => {
+  EXPECTED_STATUSES.forEach((status) => {
     it(`${status} 渲染出可读文案 + 图标 + 状态 class`, () => {
       const label = zhCN.chat.toolStatus[status]
       const wrapper = mount(ToolCallBar, {
@@ -164,7 +158,7 @@ describe('ToolCallTimeline · 状态文案来源优先级', () => {
     setupPinia({ display: { toolStatusLabels: { succeeded: '执行成功' } } })
 
     const wrapper = mount(ToolCallTimeline, {
-      props: { messageId: '5002', calls: [call('succeeded', { resultSummary: '晴' })] },
+      props: { calls: [call('succeeded', { resultSummary: '晴' })] },
     })
 
     expect(wrapper.find('.tool-bar-status').text()).toBe('执行成功')
@@ -174,7 +168,7 @@ describe('ToolCallTimeline · 状态文案来源优先级', () => {
     setupPinia({ display: { toolStatusLabels: [{ value: 'failed', label: '调用失败' }] } })
 
     const wrapper = mount(ToolCallTimeline, {
-      props: { messageId: '5002', calls: [call('failed', { errorCode: 30057 })] },
+      props: { calls: [call('failed', { errorCode: 30057 })] },
     })
 
     expect(wrapper.find('.tool-bar-status').text()).toBe('调用失败')
@@ -184,7 +178,7 @@ describe('ToolCallTimeline · 状态文案来源优先级', () => {
     setupPinia({})
 
     const wrapper = mount(ToolCallTimeline, {
-      props: { messageId: '5002', calls: [call('timed_out')] },
+      props: { calls: [call('timed_out')] },
     })
 
     const text = wrapper.find('.tool-bar-status').text()
@@ -196,42 +190,10 @@ describe('ToolCallTimeline · 状态文案来源优先级', () => {
     setupPinia({})
 
     const wrapper = mount(ToolCallTimeline, {
-      props: { messageId: '5002', calls: [call('compensating')] },
+      props: { calls: [call('compensating')] },
     })
 
     expect(wrapper.find('.tool-bar-status').text()).toBe(zhCN.chat.toolStatus.unknown)
     expect(wrapper.text()).not.toContain('compensating')
-  })
-
-  it('风险文案未下发时不渲染风险标签（🔴 绝不硬编码"高风险"）', () => {
-    setupPinia({ tool: { confirmWaitSeconds: 60 } })
-
-    const wrapper = mount(ToolCallTimeline, {
-      props: {
-        messageId: '5002',
-        calls: [call('awaiting_confirmation', { riskLevel: 'high' })],
-      },
-    })
-
-    expect(wrapper.find('.confirm').exists()).toBe(true)
-    expect(wrapper.find('.confirm-risk').exists()).toBe(false)
-    expect(wrapper.text()).not.toContain('高风险')
-  })
-
-  it('风险文案已下发时按下发内容渲染标签', () => {
-    setupPinia({
-      tool: { confirmWaitSeconds: 60 },
-      display: { toolRiskLabels: { high: '高风险操作' } },
-    })
-
-    const wrapper = mount(ToolCallTimeline, {
-      props: {
-        messageId: '5002',
-        calls: [call('awaiting_confirmation', { riskLevel: 'high' })],
-      },
-    })
-
-    expect(wrapper.find('.confirm-risk').text()).toBe('高风险操作')
-    expect(wrapper.find('.confirm-risk').classes()).toContain('confirm-risk--high')
   })
 })

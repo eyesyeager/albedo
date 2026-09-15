@@ -69,7 +69,6 @@ public class ChatController {
     private final GenerationAdmission admission;
     private final QuotaService quotaService;
     private final Executor aiStreamExecutor;
-    private final com.eyes.albedo.tool.ToolConfirmRegistry toolConfirmRegistry;
     private final BusinessConfig businessConfig;
     private final CancelRegistry cancelRegistry;
 
@@ -79,7 +78,6 @@ public class ChatController {
                           GenerationAdmission admission,
                           QuotaService quotaService,
                           @Qualifier(AsyncConfig.AI_STREAM_EXECUTOR) Executor aiStreamExecutor,
-                          com.eyes.albedo.tool.ToolConfirmRegistry toolConfirmRegistry,
                           BusinessConfig businessConfig,
                           CancelRegistry cancelRegistry) {
         this.chatService = chatService;
@@ -88,7 +86,6 @@ public class ChatController {
         this.admission = admission;
         this.quotaService = quotaService;
         this.aiStreamExecutor = aiStreamExecutor;
-        this.toolConfirmRegistry = toolConfirmRegistry;
         this.businessConfig = businessConfig;
         this.cancelRegistry = cancelRegistry;
     }
@@ -225,13 +222,7 @@ public class ChatController {
         emitter.onTimeout(() -> onTransportTimeout(assistantId, deadlineSeconds, graceSeconds));
         emitter.onError(e -> {
             log.debug("SSE 连接异常结束：messageId={}", assistantId);
-            wakeConfirmWaiters(assistantId, "error");
         });
-        // 🔴 ADR-008 第 9 条：客户端断连（关页面 / 切网）必须立即把确认等待唤醒为 cancelled，
-        //    否则生成线程会白等满 tool.confirm_wait_seconds（默认 120s），
-        //    最坏 64 个线程被占住 → CallerRunsPolicy 回压到 Tomcat 线程（AR-008）。
-        //    正常结束时 onCompletion 也会触发，此时已无等待者，调用是幂等的空操作。
-        emitter.onCompletion(() -> wakeConfirmWaiters(assistantId, "completion"));
 
         // TenantAwareTaskDecorator 会复制租户上下文快照；业务判断仍只用 prepared 中的显式值
         aiStreamExecutor.execute(() -> streamRunner.run(prepared, writer));
@@ -260,7 +251,6 @@ public class ChatController {
      */
     private void onTransportTimeout(long assistantMessageId, long deadlineSeconds,
                                     long graceSeconds) {
-        wakeConfirmWaiters(assistantMessageId, "timeout");
         boolean closed = cancelRegistry.close(assistantMessageId);
         log.warn("[DEADLINE] 🔴 SSE 传输层超时先于业务收敛到达（本不应发生）：messageId={} "
                         + "sseTimeoutSeconds={} deadlineSeconds={} graceSeconds={} upstreamClosed={}；"
@@ -268,17 +258,6 @@ public class ChatController {
                         + "（ADR-017 ⑤⑥ / AR-022）",
                 assistantMessageId, deadlineSeconds + graceSeconds, deadlineSeconds, graceSeconds,
                 closed);
-    }
-
-    /**
-     * 唤醒该消息上所有确认等待（🔴 幂等：无等待者时为空操作）。
-     */
-    private void wakeConfirmWaiters(long assistantMessageId, String cause) {
-        int woken = toolConfirmRegistry.cancelByMessage(assistantMessageId);
-        if (woken > 0) {
-            log.info("客户端连接结束（{}），已唤醒确认等待为 cancelled：messageId={} count={}",
-                    cause, assistantMessageId, woken);
-        }
     }
 
     private ResponseEntity<SseEmitter> sseResponse(SseEmitter emitter) {

@@ -45,7 +45,6 @@ export default {
     messageList: '对话内容',
     generatingStatus: '回答生成状态',
     toolCallSummaryToggle: '展开或收起工具调用摘要',
-    toolConfirmCard: '高风险工具确认',
   },
   auth: {
     login: '登录',
@@ -110,7 +109,6 @@ export default {
     },
     toolStatus: {
       pending: '排队中',
-      awaiting_confirmation: '等待确认',
       running: '执行中',
       succeeded: '已完成',
       failed: '执行失败',
@@ -126,20 +124,6 @@ export default {
       summaryTruncated: '内容较长，仅显示部分摘要',
       argsLabel: '调用参数',
       resultLabel: '调用结果',
-    },
-    toolConfirm: {
-      title: '需要你确认后才会执行',
-      argsLabel: '将要使用的信息',
-      allow: '允许执行',
-      deny: '拒绝',
-      announcement: '有一项操作需要你确认后才会执行',
-      remaining: '剩余 {remaining} 秒可决定',
-      expiring: '确认时间即将结束',
-      submitting: '正在提交你的决定…',
-      stopping: '正在停止本次回答，暂不执行该操作',
-      expiredSyncing: '确认时间已结束，正在同步结果',
-      stateSynced: '该操作已有处理结果，已同步为最新状态',
-      pendingBadge: '有待确认的操作',
     },
     /**
      * 每日对话额度（design-system.md §15.10 命名契约）。
@@ -182,7 +166,6 @@ export default {
     toolDenied: {
       title: '该操作未执行',
       description: '这次没有获得执行许可，操作未被执行',
-      confirmTimeout: '确认时间已过，操作未被执行',
     },
     toolTimeout: {
       title: '操作未在时限内完成',
@@ -199,10 +182,6 @@ export default {
     toolLoopLimit: {
       title: '本次已达到操作次数上限',
       description: '本次回答已达到可执行的操作次数上限，可重新提问继续',
-    },
-    toolConfirmConflict: {
-      title: '该操作已有处理结果',
-      description: '该操作已经有处理结果，界面已同步为最新状态',
     },
     toolRetryBlocked: {
       title: '结果待确认',

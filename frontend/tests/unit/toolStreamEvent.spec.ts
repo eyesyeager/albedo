@@ -9,28 +9,31 @@ import { collectStreamEvents, sseResponse, streamOptions, stubLocation } from '.
  * SSE `tool` 事件解析契约（docs/api-spec.md §5.2 / §5.4.1）。
  *
  * 覆盖两件事：
- *   ① 12 个字段全部按契约解析，类型与取值不失真；
- *   ② 🔴 **向后兼容硬约束**：未知字段、未知 `status` / `riskLevel`、缺省可选字段、
+ *   ① 10 个字段全部按契约解析，类型与取值不失真；
+ *   ② 🔴 **向后兼容硬约束**：未知字段、未知 `status`、缺省可选字段、
  *      null 值都不得抛异常、不得中断流 —— M1「只读 summary」的行为必须继续可用。
  */
+/** AG-UI 完成收尾：Custom(completion) + RUN_FINISHED。 */
 const DONE_FRAME =
-  'event: done\ndata: {"finishReason":"stop","messageId":"5002","status":"completed","title":null}\n\n'
+  'data: {"type":"CUSTOM","name":"completion","value":{"finishReason":"stop",'
+  + '"messageId":"5002","status":"completed","title":null}}\n\n'
+  + 'data: {"type":"RUN_FINISHED","outcome":{"type":"success"}}\n\n'
 
+/** AG-UI 工具状态帧：Custom(tool_progress) 承载 10 字段。 */
 function toolFrame(payload: Record<string, unknown>): string {
-  return `event: tool\ndata: ${JSON.stringify(payload)}\n\n`
+  return `data: ${JSON.stringify({ type: 'CUSTOM', name: 'tool_progress', value: payload })}\n\n`
 }
 
 function stubFetch(chunks: readonly string[]): void {
   vi.stubGlobal('fetch', vi.fn(() => Promise.resolve(sseResponse(chunks))))
 }
 
-/** 后端第三阶段实际下发的完整 12 字段帧。 */
+/** 后端实际下发的完整 10 字段帧。 */
 const FULL_PAYLOAD = {
   toolCallId: '9001',
   toolType: 'mcp',
   toolKey: 'weather:query',
-  riskLevel: 'high',
-  status: 'awaiting_confirmation',
+  status: 'running',
   round: 1,
   summary: 'city=上海',
   argsSummary: 'city=上海',
@@ -48,7 +51,7 @@ async function firstToolEvent(chunks: readonly string[]): Promise<ToolStreamEven
   return tool as ToolStreamEvent
 }
 
-describe('SSE tool 事件 · 12 字段解析', () => {
+describe('SSE tool 事件 · 10 字段解析', () => {
   beforeEach(() => {
     localStorage.clear()
     stubLocation()
@@ -58,7 +61,7 @@ describe('SSE tool 事件 · 12 字段解析', () => {
     vi.unstubAllGlobals()
   })
 
-  it('完整帧的 12 个字段全部解析正确，且 id 保持 string（ADR-004）', async () => {
+  it('完整帧的 10 个字段全部解析正确，且 id 保持 string（ADR-004）', async () => {
     stubFetch([toolFrame(FULL_PAYLOAD), DONE_FRAME])
 
     const tool = await firstToolEvent([])
@@ -67,8 +70,7 @@ describe('SSE tool 事件 · 12 字段解析', () => {
     expect(typeof tool.toolCallId).toBe('string')
     expect(tool.toolType).toBe('mcp')
     expect(tool.toolKey).toBe('weather:query')
-    expect(tool.riskLevel).toBe('high')
-    expect(tool.status).toBe('awaiting_confirmation')
+    expect(tool.status).toBe('running')
     expect(tool.round).toBe(1)
     // 🔴 兼容字段 summary 必须继续解析（V1.0 已声明，永久保留）
     expect(tool.summary).toBe('city=上海')
@@ -159,14 +161,6 @@ describe('SSE tool 事件 · 向后兼容（api-spec §5.4.1）', () => {
     expect((events[1] as ToolStreamEvent).status).toBe('succeeded')
   })
 
-  it('🔴 未知 riskLevel 降级为空串（不渲染风险标签，绝不猜测风险）', async () => {
-    stubFetch([toolFrame({ ...FULL_PAYLOAD, riskLevel: 'critical' }), DONE_FRAME])
-
-    const tool = await firstToolEvent([])
-
-    expect(tool.riskLevel).toBe('')
-  })
-
   it('🔴 M1 旧帧（只有 toolCallId + status + summary）仍能正常解析', async () => {
     stubFetch([
       toolFrame({ toolCallId: '9001', status: 'running', summary: '正在查询' }),
@@ -182,7 +176,6 @@ describe('SSE tool 事件 · 向后兼容（api-spec §5.4.1）', () => {
     expect(tool.toolKey).toBe('')
     expect(tool.argsSummary).toBe('')
     expect(tool.resultSummary).toBe('')
-    expect(tool.riskLevel).toBe('')
     expect(tool.round).toBe(0)
     expect(tool.truncated).toBe(false)
     expect(tool.errorCode).toBeNull()
@@ -195,7 +188,6 @@ describe('SSE tool 事件 · 向后兼容（api-spec §5.4.1）', () => {
         toolCallId: '9001',
         toolType: null,
         toolKey: null,
-        riskLevel: null,
         status: null,
         round: null,
         summary: null,
@@ -220,7 +212,7 @@ describe('SSE tool 事件 · 向后兼容（api-spec §5.4.1）', () => {
 
   it('🔴 非法 JSON 的 tool 帧被跳过，后续 tool / done 不受影响', async () => {
     stubFetch([
-      'event: tool\ndata: {"toolCallId":"9001",\n\n',
+      'data: {"type":"CUSTOM","name":"tool_progress","value":{"toolCallId":"9001",\n\n',
       toolFrame({ ...FULL_PAYLOAD, status: 'succeeded' }),
       DONE_FRAME,
     ])

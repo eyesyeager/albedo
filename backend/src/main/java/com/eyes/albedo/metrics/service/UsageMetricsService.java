@@ -220,15 +220,14 @@ public class UsageMetricsService {
 
             long[] counters = acc.computeIfAbsent(bucket, key -> new long[3]);
             counters[0] += count;
-            if (ToolCall.STATUS_DENIED.equals(status)
-                    || ToolStateMachine.confirmTimeout(status, errorCode)) {
+            if (ToolCall.STATUS_DENIED.equals(status)) {
                 counters[1] += count;
             } else if (ToolCall.STATUS_FAILED.equals(status)
                     || ToolStateMachine.executionTimeout(status, errorCode)) {
                 counters[2] += count;
             } else if (ToolCall.STATUS_TIMED_OUT.equals(status)) {
-                log.warn("🔴 tool_calls 出现 status=timed_out 但 errorCode 非 30050/30051/30056 的行"
-                        + "（实现缺陷，本行不计入 denied/failed）：errorCode={}", errorCode);
+                log.warn("🔴 tool_calls 出现 status=timed_out 但 errorCode 非 30051/30056 的行"
+                        + "（实现缺陷，本行不计入 failed）：errorCode={}", errorCode);
             }
         }
         Map<String, ToolCounters> result = new LinkedHashMap<>();

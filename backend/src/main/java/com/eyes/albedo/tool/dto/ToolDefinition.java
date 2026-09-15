@@ -27,8 +27,6 @@ import com.eyes.albedo.tool.ToolFunctionNames;
  * @param description          说明（会下发给模型）
  * @param inputSchema          JSON Schema draft 2020-12
  * @param schemaDigest         Schema 摘要（落 {@code tool_calls.schema_digest} 供追溯）
- * @param riskLevel            {@code low} / {@code medium} / {@code high}
- * @param requiresConfirmation 是否需逐次确认（由 {@code ToolRiskPolicy} 判定）
  * @param idempotent           是否幂等（🔴 非幂等 + 结果未知 → {@code 30056} 禁止自动重试）
  * @param timeoutSeconds       本工具的执行超时
  * @param mcpId                MCP 工具所属服务 ID（本地 Tool 为 null）
@@ -41,8 +39,6 @@ public record ToolDefinition(String toolType,
                              String description,
                              String inputSchema,
                              String schemaDigest,
-                             String riskLevel,
-                             boolean requiresConfirmation,
                              boolean idempotent,
                              int timeoutSeconds,
                              Long mcpId,
@@ -57,11 +53,10 @@ public record ToolDefinition(String toolType,
      */
     public static ToolDefinition of(String toolType, String toolKey, String toolName,
                                     String description, String inputSchema, String schemaDigest,
-                                    String riskLevel, boolean requiresConfirmation,
                                     boolean idempotent, int timeoutSeconds, Long mcpId,
                                     String grantConfigJson) {
         return new ToolDefinition(toolType, toolKey, ToolFunctionNames.normalize(toolKey), toolName,
-                description, inputSchema, schemaDigest, riskLevel, requiresConfirmation, idempotent,
+                description, inputSchema, schemaDigest, idempotent,
                 timeoutSeconds, mcpId, grantConfigJson);
     }
 

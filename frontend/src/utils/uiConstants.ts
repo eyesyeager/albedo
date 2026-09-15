@@ -32,12 +32,6 @@ export const WCAG_AA_CONTRAST = 4.5
 /** 倒计时刷新间隔：每秒更新一次可视文本（design-system §14.3.2：不逐秒播报、不逐秒动画）。 */
 export const COUNTDOWN_TICK_MS = 1000
 
-/**
- * 高风险确认「临近结束」提醒的剩余比例（design-system §14.3.2）。
- * 🔴 按总时长比例计算，绝不硬编码秒数（总时长来自 `sys_config: tool.confirmWaitSeconds`）。
- */
-export const CONFIRM_EXPIRING_RATIO = 0.25
-
 /** 限流恢复说明的保留时长（design-system §14.4：交叉淡化后短暂保留再移除）。 */
 export const RATE_LIMIT_RECOVERED_NOTE_MS = 5000
 

@@ -163,26 +163,6 @@ class TransactionDisciplineScanTest {
     }
 
     @Test
-    @DisplayName("🔴 ToolConfirmWriter 必须是 REQUIRES_NEW 短事务 + 行锁裁决（confirm 的唯一裁决点）")
-    void confirmWriterUsesRowLockInShortTransaction() throws IOException {
-        Path writer = SOURCE_ROOT.resolve(
-                Paths.get("com", "eyes", "albedo", "tool", "ToolConfirmWriter.java"));
-        assertTrue(Files.exists(writer), "ToolConfirmWriter 必须存在（§7.8.2 冲突矩阵的落地点）");
-        String content = read(writer);
-
-        int transactional = countOccurrences(content, "@Transactional");
-        assertTrue(transactional > 0, "确认流转必须在事务内");
-        assertEquals(transactional, countOccurrences(content, "Propagation.REQUIRES_NEW"),
-                "🔴 每个事务方法都必须是独立短事务（REQUIRES_NEW）");
-        assertTrue(content.contains("findByIdForUpdate"),
-                "🔴 状态机裁决必须在 SELECT … FOR UPDATE 行锁内进行");
-        // 🔴 唤醒必须在事务之外：writer 里不得出现 Future/Redis 唤醒动作
-        assertFalse(content.contains("confirmRegistry"),
-                "🔴 唤醒生成线程必须发生在短事务提交之后（放在 ToolConfirmService），"
-                        + "否则生成线程可能读到未提交状态");
-    }
-
-    @Test
     @DisplayName("🔴 §7.6.3 #4：执行前授权点查必须存在且不可缓存（ToolOrchestrator 置 running 前调用）")
     void grantPointCheckExistsAndIsNotCached() throws IOException {
         Path pointCheck = SOURCE_ROOT.resolve(
@@ -241,20 +221,6 @@ class TransactionDisciplineScanTest {
                 "🔴 30052 仅保留连接/传输/协议/上游鉴权原义，禁止作为竞态兜底码");
         assertTrue(content.contains("deniedDuringExecution"),
                 "🔴 必须存在执行期安全拒绝的专用分支（denied + 30050 + 审计路由）");
-    }
-
-    @Test
-    @DisplayName("🔴 §7.8.2 ④：confirm 回放不得写审计（回放路径不允许出现 audit 写入调用）")
-    void confirmReplayDoesNotWriteAudit() throws IOException {
-        Path writer = SOURCE_ROOT.resolve(
-                Paths.get("com", "eyes", "albedo", "tool", "ToolConfirmWriter.java"));
-        String content = read(writer);
-        assertFalse(content.contains("replayed:"),
-                "🔴 已裁决删除 reason 的 replayed: 前缀写法（回放一律不写审计）");
-        assertTrue(content.contains("writeFirstDecisionAudit"),
-                "🔴 审计入口必须显式区分「首次决定」与回放");
-        assertTrue(content.contains("alreadyRecorded"),
-                "🔴 30055 冲突审计必须在行锁内点查去重（同一 toolCallId 至多一条）");
     }
 
     @Test
