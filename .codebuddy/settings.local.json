@@ -1,0 +1,6 @@
+{
+  "enabledPlugins": {
+    "ui-ux-pro-max@codebuddy-plugins-official": true,
+    "frontend-design@codebuddy-plugins-official": true
+  }
+}
