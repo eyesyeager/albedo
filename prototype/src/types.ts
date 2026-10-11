@@ -9,6 +9,51 @@ export interface RerankerProvider {
   keyHint: string;
   doc: string;
 }
+
+export type VectorStoreType =
+  | "MILVUS"
+  | "QDRANT"
+  | "PGVECTOR"
+  | "ELASTICSEARCH"
+  | "CUSTOM";
+
+/** 预置的主流向量数据库接入方式：用户选择后填写连接信息即可 */
+export interface VectorStoreProvider {
+  key: string;
+  name: string;
+  type: VectorStoreType;
+  desc: string;
+  defaultHost: string;
+  defaultPort: number;
+}
+
+/** 用户自配置的向量数据库连接（平台不内置实例） */
+export interface VectorStoreConfig {
+  id: string;
+  name: string;
+  type: VectorStoreType;
+  host: string;
+  port: number;
+  database: string;
+  collection: string;
+  authMasked: string;
+  dim: number;
+  status: "connected" | "error" | "untested";
+  updatedAt: string;
+}
+
+/** 用户自配置的 Elasticsearch 连接（供混合检索 BM25 召回） */
+export interface ElasticsearchConfig {
+  id: string;
+  name: string;
+  endpoint: string;
+  username: string;
+  authMasked: string;
+  indexPrefix: string;
+  status: "connected" | "error" | "untested";
+  updatedAt: string;
+}
+
 export type DocStatus = "success" | "parsing" | "failed" | "pending";
 
 export interface Model {
@@ -87,6 +132,7 @@ export interface KnowledgeBase {
   desc: string;
   embeddingModel: string;
   reranker: string;
+  vectorStore: string;
   retrieveMode: "vector" | "hybrid";
   topK: number;
   docCount: number;

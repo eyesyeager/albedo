@@ -1,5 +1,6 @@
 import type {
   AppItem,
+  ElasticsearchConfig,
   KnowledgeBase,
   McpServer,
   Model,
@@ -8,6 +9,8 @@ import type {
   SessionTrace,
   Skill,
   User,
+  VectorStoreConfig,
+  VectorStoreProvider,
 } from "@/types";
 
 export const currentUser: User = {
@@ -217,6 +220,94 @@ export const rerankerProviders: RerankerProvider[] = [
   },
 ];
 
+// 主流向量数据库接入方式：平台不内置实例，用户自配置连接
+export const vectorStoreProviders: VectorStoreProvider[] = [
+  {
+    key: "milvus",
+    name: "Milvus",
+    type: "MILVUS",
+    desc: "分布式向量数据库，海量向量高性能检索",
+    defaultHost: "127.0.0.1",
+    defaultPort: 19530,
+  },
+  {
+    key: "qdrant",
+    name: "Qdrant",
+    type: "QDRANT",
+    desc: "Rust 编写的高性能向量引擎，过滤表达式丰富",
+    defaultHost: "127.0.0.1",
+    defaultPort: 6333,
+  },
+  {
+    key: "pgvector",
+    name: "pgvector",
+    type: "PGVECTOR",
+    desc: "PostgreSQL 向量扩展，与业务库同源、运维成本低",
+    defaultHost: "127.0.0.1",
+    defaultPort: 5432,
+  },
+  {
+    key: "elasticsearch",
+    name: "Elasticsearch",
+    type: "ELASTICSEARCH",
+    desc: "向量 + BM25 同源，原生 RRF 混合检索",
+    defaultHost: "127.0.0.1",
+    defaultPort: 9200,
+  },
+  {
+    key: "custom",
+    name: "自建 / 兼容服务",
+    type: "CUSTOM",
+    desc: "兼容 Spring AI VectorStore 接口的任意服务",
+    defaultHost: "",
+    defaultPort: 0,
+  },
+];
+
+// 用户已接入的向量数据库连接
+export const vectorStores: VectorStoreConfig[] = [
+  {
+    id: "vs-001",
+    name: "生产向量库",
+    type: "MILVUS",
+    host: "10.0.8.21",
+    port: 19530,
+    database: "albedo",
+    collection: "kb_chunks",
+    authMasked: "root:****",
+    dim: 1024,
+    status: "connected",
+    updatedAt: "2026-10-08 10:12",
+  },
+  {
+    id: "vs-002",
+    name: "测试 Elasticsearch",
+    type: "ELASTICSEARCH",
+    host: "10.0.8.22",
+    port: 9200,
+    database: "albedo_test",
+    collection: "kb_chunks",
+    authMasked: "elastic:****",
+    dim: 1024,
+    status: "connected",
+    updatedAt: "2026-10-09 09:02",
+  },
+];
+
+// 用户已接入的 Elasticsearch 连接（供混合检索 BM25 召回）
+export const elasticsearchConfigs: ElasticsearchConfig[] = [
+  {
+    id: "es-001",
+    name: "生产 ES 集群",
+    endpoint: "https://es.internal.eyescode.top:9200",
+    username: "elastic",
+    authMasked: "****",
+    indexPrefix: "albedo_kb",
+    status: "connected",
+    updatedAt: "2026-10-08 10:12",
+  },
+];
+
 const appConfigDemo = {
   model: "qwen-max",
   modelMode: "fixed" as const,
@@ -366,6 +457,7 @@ export const knowledgeBases: KnowledgeBase[] = [
     desc: "公司制度、考勤、薪酬、福利等内部文档。",
     embeddingModel: "bge-m3",
     reranker: "bge-reranker-v2-m3",
+    vectorStore: "生产向量库",
     retrieveMode: "hybrid",
     topK: 5,
     docCount: 12,
@@ -379,6 +471,7 @@ export const knowledgeBases: KnowledgeBase[] = [
     desc: "产品白皮书、FAQ、发布说明与客户案例。",
     embeddingModel: "text-embedding-3-large",
     reranker: "bge-reranker-v2-m3",
+    vectorStore: "生产向量库",
     retrieveMode: "hybrid",
     topK: 6,
     docCount: 34,
@@ -392,6 +485,7 @@ export const knowledgeBases: KnowledgeBase[] = [
     desc: "标准合同模板与历史签署合同（脱敏）。",
     embeddingModel: "bge-m3",
     reranker: "bge-reranker-v2-m3",
+    vectorStore: "测试 Elasticsearch",
     retrieveMode: "vector",
     topK: 4,
     docCount: 8,

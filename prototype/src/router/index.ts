@@ -41,6 +41,11 @@ const router = createRouter({
       component: () => import("@/views/knowledge/KBDetail.vue"),
     },
     {
+      path: "/storage",
+      name: "storage",
+      component: () => import("@/views/storage/StorageConfig.vue"),
+    },
+    {
       path: "/mcp",
       name: "mcp",
       component: () => import("@/views/mcp/MCPList.vue"),

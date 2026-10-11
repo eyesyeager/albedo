@@ -53,6 +53,7 @@ function runRetrieve() {
           <span class="tag t-hy">{{ kb.retrieveMode === "hybrid" ? "混合检索" : "向量检索" }}</span>
           <span class="chip">Embedding · {{ kb.embeddingModel }}</span>
           <span class="chip">Reranker · {{ kb.reranker || "未配置" }}</span>
+          <span class="chip">向量库 · {{ kb.vectorStore || "未配置" }}</span>
           <span class="chip">TopK {{ kb.topK }}</span>
         </div>
       </div>

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, computed } from "vue";
 import { useRouter } from "vue-router";
-import { knowledgeBases, models } from "@/data/mock";
+import { knowledgeBases, models, vectorStores } from "@/data/mock";
 import { kbUsage } from "@/store/usage";
 import type { KnowledgeBase } from "@/types";
 import StatusTag from "@/components/StatusTag.vue";
@@ -33,6 +33,7 @@ const form = ref({
   desc: "",
   embedding: "bge-m3",
   reranker: onlineRerankers.value[0] || "",
+  vectorStore: vectorStores[0]?.name || "",
   mode: "hybrid" as const,
   topK: 5,
 });
@@ -57,6 +58,7 @@ function create() {
     desc: form.value.desc || "（暂无描述）",
     embeddingModel: form.value.embedding,
     reranker: form.value.reranker,
+    vectorStore: form.value.vectorStore,
     retrieveMode: form.value.mode,
     topK: form.value.topK,
     docCount: 0,
@@ -70,6 +72,7 @@ function create() {
     desc: "",
     embedding: "bge-m3",
     reranker: onlineRerankers.value[0] || "",
+    vectorStore: vectorStores[0]?.name || "",
     mode: "hybrid",
     topK: 5,
   };
@@ -146,6 +149,17 @@ function create() {
           </select>
         </div>
       </div>
+      <div style="margin-top:16px">
+        <label class="field-label">
+          向量数据库
+          <span class="muted" style="font-weight:400">· 平台不内置实例，在「检索引擎配置」中接入</span>
+        </label>
+        <select v-model="form.vectorStore" class="field">
+          <option v-for="v in vectorStores" :key="v.id" :value="v.name">
+            {{ v.name }}（{{ v.type === "ELASTICSEARCH" ? "Elasticsearch" : v.type }}）
+          </option>
+        </select>
+      </div>
       <div class="row2" style="margin-top:16px">
         <div>
           <label class="field-label">检索方式</label>
@@ -158,6 +172,9 @@ function create() {
           <label class="field-label">召回数量 Top-K</label>
           <input v-model.number="form.topK" type="number" class="field" />
         </div>
+      </div>
+      <div class="field-hint" style="margin-top:12px">
+        混合检索依赖 Elasticsearch 关键词（BM25）召回，需先在「检索引擎配置」中接入 ES 连接信息。
       </div>
       <template #foot>
         <button class="btn" @click="showCreate = false">取消</button>

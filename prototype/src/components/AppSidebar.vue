@@ -26,6 +26,11 @@ const nav = [
     icon: "M4 4h13a2 2 0 0 1 2 2v14H6a2 2 0 0 1-2-2V4zm4 4h7M8 12h7M8 16h5",
   },
   {
+    name: "检索引擎配置",
+    path: "/storage",
+    icon: "M12 3c4.97 0 9 1.34 9 3s-4.03 3-9 3-9-1.34-9-3 4.03-3 9-3zM3 6v12c0 1.66 4.03 3 9 3s9-1.34 9-3V6M3 12c0 1.66 4.03 3 9 3s9-1.34 9-3",
+  },
+  {
     name: "MCP 管理",
     path: "/mcp",
     icon: "M9 3v3M15 3v3M9 18v3M15 18v3M3 9h3M3 15h3M18 9h3M18 15h3M6 6h12v12H6z",
@@ -45,6 +50,7 @@ const nav = [
 function active(path: string) {
   if (path === "/apps" && route.path.startsWith("/apps")) return true;
   if (path === "/knowledge" && route.path.startsWith("/knowledge")) return true;
+  if (path === "/storage" && route.path.startsWith("/storage")) return true;
   if (path === "/mcp" && route.path.startsWith("/mcp")) return true;
   if (path === "/skills" && route.path.startsWith("/skills")) return true;
   return route.path === path;
