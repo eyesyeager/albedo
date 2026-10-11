@@ -27,6 +27,49 @@ export interface Model {
   updatedAt: string;
 }
 
+/** 技能包解压后的单个文件（路径为包内相对路径，目录层级由调用方自行构建） */
+export interface SkillPackageFile {
+  path: string;
+  size: number;
+  /** 文本文件内容；二进制资源为空 */
+  content?: string;
+  /** 是否为二进制资源（图片/字体等），为 true 时不做内容预览 */
+  binary?: boolean;
+}
+
+/** 技能包（SKILL.md / 压缩包）解析报告 */
+export interface SkillPackageReport {
+  fileName: string;
+  size: string;
+  kind: string;
+  valid: boolean;
+  checks: { label: string; ok: boolean; hint: string }[];
+  manifest: {
+    name: string;
+    description: string;
+    version: string;
+    icon: string;
+  };
+  /** 解压后的全部文件（扁平列表，含目录层级路径） */
+  files: SkillPackageFile[];
+  /** 入口 Markdown 文件内容预览（不假定固定文件名） */
+  preview: string;
+  /** 识别出的入口文件路径，如 SKILL.md / README.md，未识别则为空 */
+  entryPath?: string;
+}
+
+export interface HealthCheckResult {
+  modelId: string;
+  modelName: string;
+  type: ModelType;
+  ok: boolean;
+  /** 本次健康检查的模拟耗时（ms） */
+  latencyMs: number;
+  request: { method: string; url: string; body: string };
+  response: { status: string; latencyMs: number; body: string };
+  summary: string;
+}
+
 export interface DocItem {
   id: string;
   name: string;
@@ -74,13 +117,22 @@ export interface Skill {
   name: string;
   desc: string;
   icon: string;
-  mcp: string;
   preset: boolean;
+  /** 来自技能包导入（SKILL.md + references/ + scripts/ + assets/ 压缩包） */
+  packaged?: boolean;
+  /** 技能包版本（取自 SKILL.md frontmatter 的 version） */
+  version?: string;
+  /** 技能包解压后的全部文件（不假定固定目录规范） */
+  packageFiles?: SkillPackageFile[];
+  /** 识别出的入口文件路径（根目录 Markdown，优先 SKILL.md） */
+  entryPath?: string;
 }
 
 export interface ToolBinding {
   id: string;
   kind: "KnowledgeBase" | "MCP" | "Skill";
+  /** 被引用资源的 id（知识库 id / MCP id / Skill id），用于删除前的占用校验 */
+  refId?: string;
   name: string;
   sub: string;
   enabled: boolean;

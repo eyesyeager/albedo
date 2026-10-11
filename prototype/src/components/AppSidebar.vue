@@ -46,6 +46,7 @@ function active(path: string) {
   if (path === "/apps" && route.path.startsWith("/apps")) return true;
   if (path === "/knowledge" && route.path.startsWith("/knowledge")) return true;
   if (path === "/mcp" && route.path.startsWith("/mcp")) return true;
+  if (path === "/skills" && route.path.startsWith("/skills")) return true;
   return route.path === path;
 }
 </script>

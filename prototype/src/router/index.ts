@@ -56,6 +56,11 @@ const router = createRouter({
       component: () => import("@/views/skills/SkillList.vue"),
     },
     {
+      path: "/skills/:id",
+      name: "skillDetail",
+      component: () => import("@/views/skills/SkillDetail.vue"),
+    },
+    {
       path: "/logs",
       name: "logs",
       component: () => import("@/views/logs/OperationLogs.vue"),

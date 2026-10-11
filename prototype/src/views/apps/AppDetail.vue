@@ -36,6 +36,9 @@ function save() {
   saved.value = true;
   setTimeout(() => (saved.value = false), 2200);
 }
+function unbindTool(id: string) {
+  cfg.value.tools = cfg.value.tools.filter((t) => t.id !== id);
+}
 function rollback(snapId: string) {
   const s = app.value.snapshots.find((x) => x.id === snapId);
   if (s) {
@@ -222,6 +225,9 @@ const aguiEvents = [
                 <button :class="{ on: t.strategy === 'always' }" @click="t.strategy = 'always'">必调</button>
               </div>
               <span class="switch" :class="{ on: t.enabled }" @click="t.enabled = !t.enabled" />
+              <button class="tool-del" title="解绑后即可删除该资源" @click="unbindTool(t.id)">
+                解绑
+              </button>
             </div>
             <button class="add-tool">+ 挂载知识库 / MCP Server</button>
           </section>
@@ -565,6 +571,21 @@ const aguiEvents = [
   font-size: 12px;
   color: var(--text-3);
   margin-top: 2px;
+}
+.tool-del {
+  flex: none;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text-3);
+  font-size: 12px;
+  border-radius: 8px;
+  padding: 4px 9px;
+  transition: all 0.15s;
+}
+.tool-del:hover {
+  color: var(--red);
+  border-color: var(--red);
+  background: var(--red-soft);
 }
 .seg.sm button {
   height: 26px;

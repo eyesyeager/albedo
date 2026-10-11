@@ -17,6 +17,7 @@ const titleMap: Record<string, string> = {
   mcp: "MCP 管理",
   mcpDetail: "MCP 详情",
   skills: "Skill 管理",
+  skillDetail: "Skill 详情",
   logs: "操作日志",
 };
 const title = computed(() => titleMap[route.name as string] || "Albedo");

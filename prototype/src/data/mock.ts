@@ -229,6 +229,7 @@ const appConfigDemo = {
     {
       id: "t-kb-1",
       kind: "KnowledgeBase" as const,
+      refId: "kb-001",
       name: "员工手册知识库",
       sub: "12 篇文档 · 混合检索",
       enabled: true,
@@ -237,6 +238,7 @@ const appConfigDemo = {
     {
       id: "t-kb-2",
       kind: "KnowledgeBase" as const,
+      refId: "kb-002",
       name: "产品资料库",
       sub: "34 篇文档 · 混合检索",
       enabled: true,
@@ -245,6 +247,7 @@ const appConfigDemo = {
     {
       id: "t-mcp-1",
       kind: "MCP" as const,
+      refId: "mc-001",
       name: "工单系统 MCP",
       sub: "5 个工具 · 已禁用 1 个",
       enabled: true,
@@ -313,6 +316,7 @@ export const apps: AppItem[] = [
         {
           id: "t-mcp-2",
           kind: "MCP",
+          refId: "mc-001",
           name: "工单系统 MCP",
           sub: "5 个工具",
           enabled: true,
@@ -499,32 +503,118 @@ export const skills: Skill[] = [
     name: "网页搜索",
     desc: "调用搜索引擎检索最新网页信息，适合实时资讯类问答。",
     icon: "🔍",
-    mcp: "search-mcp",
     preset: true,
+    packaged: true,
+    version: "1.0.0",
+    entryPath: "SKILL.md",
+    packageFiles: [
+      {
+        path: "SKILL.md",
+        size: 486,
+        content:
+          "# 网页搜索\n\n## 适用场景\n需要实时信息（新闻、股价、最新政策）时调用。\n\n## 使用约束\n- 优先检索权威来源，至少 2 个独立来源交叉验证；\n- 回答需给出来源链接与时间；\n- 检索无结果时如实说明，不得编造。",
+      },
+      {
+        path: "references/检索质量指引.md",
+        size: 312,
+        content:
+          "查询词构造：提取实体 + 时间限定 + 领域限定词。\n\n结果筛选：优先政府/官方机构/主流媒体；排除聚合站与转载。",
+      },
+    ],
   },
   {
     id: "sk-2",
     name: "代码执行",
     desc: "在隔离沙箱中执行 Python，适合计算与数据分析。",
     icon: "🧮",
-    mcp: "sandbox-mcp",
     preset: true,
+    packaged: true,
+    version: "2.1.0",
+    entryPath: "SKILL.md",
+    packageFiles: [
+      {
+        path: "SKILL.md",
+        size: 512,
+        content:
+          "# 代码执行\n\n## 适用场景\n需要精确计算、数据清洗或统计分析时调用。\n\n## 使用约束\n- 仅使用标准库与白名单依赖；\n- 禁止网络访问与文件写入；\n- 单次执行超时 10s。",
+      },
+      {
+        path: "references/沙箱能力说明.md",
+        size: 268,
+        content:
+          "可用：math / statistics / json / csv / datetime。\n不可用：网络请求、进程调用、持久化写入。",
+      },
+      {
+        path: "references/安全边界.md",
+        size: 196,
+        content: "超时 10s、内存 256MB、无网络；异常以 stderr 返回，不中断会话。",
+      },
+      {
+        path: "scripts/run_python.py",
+        size: 734,
+        content:
+          "def run(code: str) -> str:\n    \"\"\"在隔离沙箱中执行用户代码并返回 stdout。\"\"\"\n    # 生产实现：交由工具沙箱执行，此处仅为技能包内示例脚本\n    return eval_sandbox(code)",
+      },
+    ],
   },
   {
     id: "sk-3",
     name: "图表生成",
     desc: "将结构化数据渲染为 ECharts 图表。",
     icon: "📊",
-    mcp: "chart-mcp",
     preset: true,
+    packaged: true,
+    version: "1.3.0",
+    entryPath: "SKILL.md",
+    packageFiles: [
+      {
+        path: "SKILL.md",
+        size: 528,
+        content:
+          "# 图表生成\n\n## 适用场景\n用户要求可视化或需要趋势对比时调用。\n\n## 使用约束\n- 先确认数据维度再选图表类型；\n- 趋势用折线、占比用饼图、对比用柱状；\n- 输出必须包含标题与轴标签。",
+      },
+      {
+        path: "references/图表选型指南.md",
+        size: 244,
+        content:
+          "折线：时间序列趋势。柱状：离散类别对比。饼图：占比（类别 ≤ 6）。散点：相关性。",
+      },
+      {
+        path: "assets/chart-theme.json",
+        size: 1024,
+        binary: true,
+      },
+    ],
   },
   {
     id: "sk-4",
     name: "邮件发送",
     desc: "通过 SMTP 发送通知邮件。",
     icon: "✉️",
-    mcp: "mail-mcp",
     preset: true,
+    packaged: true,
+    version: "0.9.1",
+    entryPath: "SKILL.md",
+    packageFiles: [
+      {
+        path: "SKILL.md",
+        size: 566,
+        content:
+          "# 邮件发送\n\n## 适用场景\n需要把结论、报告或审批结果通知给指定收件人时调用。\n\n## 使用约束\n- 发送前必须回显收件人、主题与正文待确认；\n- 不得向未在会话中出现的地址发送；\n- 附件需注明来源。",
+      },
+      {
+        path: "references/邮件模板规范.md",
+        size: 288,
+        content: "主题格式：[Albedo] {动作} · {对象}。正文首段给结论，次段给依据，末段给下一步。",
+      },
+      {
+        path: "scripts/render_template.py",
+        size: 812,
+        content:
+          "def render(tpl: str, ctx: dict) -> str:\n    for k, v in ctx.items():\n        tpl = tpl.replace('{{' + k + '}}', str(v))\n    return tpl",
+      },
+      { path: "assets/logo.png", size: 15360, binary: true },
+    ],
   },
 ];
 

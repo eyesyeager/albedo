@@ -1,7 +1,8 @@
 <script setup lang="ts">
-import { ref } from "vue";
+import { computed, ref } from "vue";
 import { useRouter } from "vue-router";
 import { mcpServers } from "@/data/mock";
+import { mcpUsage } from "@/store/usage";
 import type { McpServer } from "@/types";
 import StatusTag from "@/components/StatusTag.vue";
 import Modal from "@/components/Modal.vue";
@@ -9,12 +10,39 @@ import Modal from "@/components/Modal.vue";
 const router = useRouter();
 const list = ref<McpServer[]>([...mcpServers]);
 const showCreate = ref(false);
+const delTarget = ref<McpServer | null>(null);
+const blockTarget = ref<McpServer | null>(null);
+const blockUsage = computed(() => (blockTarget.value ? mcpUsage(blockTarget.value) : []));
 const testing = ref<string | null>(null);
+
+// 被应用挂载时不允许删除
+function usageCount(mcp: McpServer) {
+  return mcpUsage(mcp).length;
+}
+function requestDelete(mcp: McpServer) {
+  if (usageCount(mcp) > 0) {
+    blockTarget.value = mcp;
+    return;
+  }
+  delTarget.value = mcp;
+}
 const form = ref({ name: "", endpoint: "", transport: "SSE" as const, auth: "Bearer Token" });
 
 function test(id: string) {
   testing.value = id;
   setTimeout(() => (testing.value = null), 1100);
+}
+// 同步移除 mock 源数组，使详情页与应用工具装配读取同步生效
+function removeFromSource(id: string) {
+  const i = mcpServers.findIndex((m) => m.id === id);
+  if (i > -1) mcpServers.splice(i, 1);
+}
+function confirmDelete() {
+  if (!delTarget.value) return;
+  const id = delTarget.value.id;
+  removeFromSource(id);
+  list.value = list.value.filter((m) => m.id !== id);
+  delTarget.value = null;
 }
 function create() {
   if (!form.value.name) return;
@@ -64,6 +92,11 @@ function create() {
           <span class="chip">{{ m.transport }}</span>
           <span class="chip">{{ m.tools.length }} 个工具</span>
           <span class="chip">{{ m.tools.filter((t) => !t.enabled).length }} 禁用</span>
+          <span v-if="usageCount(m)" class="used-hint">被 {{ usageCount(m) }} 个应用使用</span>
+          <button
+            class="btn btn-xs btn-ghost danger del"
+            @click.stop="requestDelete(m)"
+          >删除</button>
         </div>
       </div>
     </div>
@@ -100,6 +133,37 @@ function create() {
       <template #foot>
         <button class="btn" @click="showCreate = false">取消</button>
         <button class="btn btn-primary" @click="create">接入并拉取工具</button>
+      </template>
+    </Modal>
+
+    <!-- 删除确认 -->
+    <Modal v-if="delTarget" title="删除 MCP Server" @close="delTarget = null">
+      <div class="del-body">
+        <div class="del-ico">⚠️</div>
+        <div>
+          确认删除 MCP Server「<b>{{ delTarget.name }}</b>」（{{ delTarget.endpoint }}）？<br />
+          将同时移除其下 <b>{{ delTarget.tools.length }}</b> 个工具，并从已挂载的应用中解绑；相关的 Skill 封装模板将不可用。此操作不可恢复。
+        </div>
+      </div>
+      <template #foot>
+        <button class="btn" @click="delTarget = null">取消</button>
+        <button class="btn btn-primary danger-btn" @click="confirmDelete">确认删除</button>
+      </template>
+    </Modal>
+
+    <!-- 被占用，禁止删除 -->
+    <Modal v-if="blockTarget" title="无法删除 MCP Server" @close="blockTarget = null">
+      <div class="del-body">
+        <div class="del-ico">🚫</div>
+        <div>
+          MCP Server「<b>{{ blockTarget.name }}</b>」正被以下应用挂载，需先在应用「工具装配」中解绑后再删除：
+          <div class="used-apps">
+            <span v-for="a in blockUsage" :key="a.id" class="used-app">{{ a.name }}</span>
+          </div>
+        </div>
+      </div>
+      <template #foot>
+        <button class="btn btn-primary" @click="blockTarget = null">我知道了</button>
       </template>
     </Modal>
   </div>
@@ -193,5 +257,54 @@ function create() {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 14px;
+}
+.del {
+  margin-left: auto;
+}
+.used-hint {
+  font-size: 11.5px;
+  color: var(--amber);
+  background: var(--amber-soft);
+  border-radius: 999px;
+  padding: 2px 9px;
+}
+.used-apps {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 10px;
+}
+.used-app {
+  font-size: 12.5px;
+  color: var(--brand-700);
+  background: var(--brand-soft);
+  border-radius: 8px;
+  padding: 3px 9px;
+}
+.danger:hover {
+  color: var(--red);
+  border-color: var(--red);
+  background: var(--red-soft);
+}
+.del-body {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  font-size: 13.5px;
+  color: var(--text-2);
+  line-height: 1.7;
+}
+.del-ico {
+  font-size: 20px;
+  flex: none;
+}
+.danger-btn {
+  background: var(--red);
+  border-color: var(--red);
+  color: #fff;
+}
+.danger-btn:hover {
+  background: #b91c1c;
+  border-color: #b91c1c;
 }
 </style>

@@ -3,7 +3,8 @@
 > 版本：v2.0
 > 日期：2026-10-10
 > 技术栈：Java 17 + Spring Boot 3.x + Spring AI MCP Client（`McpSyncClient` / `McpAsyncClient` + SSE / Streamable HTTP 传输层）
-> 关联需求：PRD v0.3 §6.5 MCP 管理、§6.6 Skill 管理（MCP 封装模板）、§7 非功能需求、§8 技术架构、§9 核心数据模型
+> 关联需求：PRD v0.3 §6.5 MCP 管理、§7 非功能需求、§8 技术架构、§9 核心数据模型
+> 说明：Skill 与 MCP **已隔离**，不再属于本模块（无 `mcp_id` 外键），详见《技术设计-Skill模块》
 > 上下游模块：向上为「智能体模块」提供工具调用（`listTools`/`callTool`）；与「模型网关」无直接依赖，独立协议适配
 
 ---
@@ -21,7 +22,7 @@ MCP 模块以 **Model Context Protocol（MCP）** 作为统一外部集成标准
 - **工具调用**：供智能体多步动态调用，非固定顺序。
 - **工具治理**：Server 级接入 + 单个高危工具禁用、密钥注入。
 - **调试**：连通性测试与工具调用调试。
-- **Skill**：官方预打包的 MCP 封装模板（预置少量模板）。
+- ~~**Skill**：官方预打包的 MCP 封装模板（预置少量模板）~~ → **已移出**：Skill 与 MCP 隔离，独立为指令与资料包模块。
 
 ### 1.2 职责边界
 
@@ -31,7 +32,7 @@ MCP 模块以 **Model Context Protocol（MCP）** 作为统一外部集成标准
 | 协议适配与工具发现 | SSE/Streamable HTTP、`initialize`、`tools/list`、`tools/call` | 智能体调度（智能体模块） |
 | 工具级禁用 | per-app 禁用标记 | 模型能力 |
 | 鉴权注入 | token/密钥注入 | 密钥存储（统一密文） |
-| Skill 模板 | 预置 MCP 封装模板 | 独立 Skill 模块（后续迭代） |
+| ~~Skill 模板~~ | **已移出**：Skill 与 MCP 隔离，独立为指令资料包模块 | 本模块不再承担任何 Skill 职责 |
 
 ### 1.3 术语约定
 
@@ -196,7 +197,7 @@ MCP 模块以 **Model Context Protocol（MCP）** 作为统一外部集成标准
 | 连接复用 | MCP 连接池 + 心跳保活 | 降低延迟，MCP 会话有状态 |
 | 鉴权注入 | token 密文存储，调用时解密注入 Header，不落明文 | 安全（APP-16/MCP-04） |
 | 同步客户端统一 | 统一 `McpSyncClient` + WebFlux 传输层（不混用异步） | Spring AI 约定同步/异步不可混用 |
-| Skill 弱化 | Skill 仅作为 MCP 封装模板引用，不建独立表 | PRD 修订 v0.3 |
+| Skill 与 MCP 隔离 | Skill 不再绑定 MCP、表中无 `mcp_id` 外键，独立为指令与资料包模块 | PRD 修订 v0.3；见《技术设计-Skill模块》 |
 
 ---
 
