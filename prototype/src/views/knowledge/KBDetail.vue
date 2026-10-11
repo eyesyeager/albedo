@@ -102,7 +102,7 @@ function runRetrieve() {
             <label class="field-label">检索 Query</label>
             <textarea v-model="query" class="field" rows="3" />
             <div class="row2" style="margin-top:12px">
-              <label class="check"><input type="checkbox" checked /> 多轮改写</div>
+              <label class="check"><input type="checkbox" checked /> 多轮改写</label>
               <label class="check"><input type="checkbox" checked /> Reranker 重排</label>
             </div>
             <button class="btn btn-primary" style="width:100%;margin-top:14px" :disabled="testing" @click="runRetrieve">
