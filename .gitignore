@@ -1,20 +1,18 @@
-# 系统文件
-.DS_Store
-
-# 依赖
+# 子包依赖与构建产物（frontend/、backend/、packages/ 等任意层级）
 node_modules/
-
-# 构建产物
 dist/
-build/
-*.tsbuildinfo
 .vite/
-
-# 日志
-*.log
+*.local
+.DS_Store
+.env
+.env.local
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 
-# 编辑器
-.idea/
+# 后端运行时产物与本地密钥
+backend/.env
+backend/var/
+backend/.venv/
+__pycache__/
+.pytest_cache/

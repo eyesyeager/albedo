@@ -1,0 +1,207 @@
+from fastapi import APIRouter, Depends
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.adapters.gateway import McpGateway
+from app.api.deps import current_session
+from app.core.security import new_id, now_iso, suffix_of
+from app.db import models as m
+from app.db.seed import to_row
+from app.db.session import get_db
+from app.schemas.domain import McpServer, ToolDiscoveryResult
+from app.schemas.requests import EnabledPatch, McpDraft, McpPatch, McpTestRequest, UsagePatch
+from app.schemas.responses import WriteResponse
+from app.services.system_config import get_configs
+from app.services.common import (
+    commit_write,
+    get_or_404,
+    mcp_to_dict,
+    store_credential,
+    validate_blank,
+    validate_json_object,
+    validate_name,
+    write_headers,
+)
+
+router = APIRouter(tags=["mcps"])
+
+
+@router.get("/mcps", response_model=list[McpServer], summary="MCP 列表")
+async def list_mcps(
+    db: AsyncSession = Depends(get_db),
+    _: m.Session = Depends(current_session),
+) -> list[dict]:
+    rows = (await db.scalars(select(m.McpServer))).all()
+    return [await mcp_to_dict(db, row) for row in rows]
+
+
+@router.post("/mcps/test", response_model=ToolDiscoveryResult, summary="MCP 连接测试与工具发现（真实连接）")
+async def test_mcp(
+    payload: McpTestRequest,
+    _: m.Session = Depends(current_session),
+) -> dict:
+    tools = await McpGateway().discover_tools(payload.model_dump())
+    return {"toolCount": len(tools), "tools": tools}
+
+
+@router.post("/mcps", response_model=WriteResponse, status_code=201, summary="接入 MCP")
+async def create_mcp(
+    payload: McpDraft,
+    db: AsyncSession = Depends(get_db),
+    _: m.Session = Depends(current_session),
+) -> dict:
+    name = validate_name(payload.name, "MCP 名称")
+    endpoint = validate_blank(payload.endpoint, "服务地址/命令不能为空")
+    validate_json_object(payload.headers)
+    config = await get_configs(db)
+    defaults = config["defaults"]["mcp"]
+    tools = await McpGateway().discover_tools(payload.model_dump())
+    stamp = now_iso()
+    row = m.McpServer(
+        id=new_id("mcp-"),
+        name=name,
+        description=payload.description.strip() or defaults["description"],
+        transport=payload.transport,
+        endpoint=endpoint,
+        headers_enc=write_headers(payload.headers),
+        timeout_seconds=payload.timeoutSeconds,
+        qpm=int(defaults["qpm"]),
+        max_concurrency=int(defaults["maxConcurrency"]),
+        enabled=True,
+        connection="normal",
+        call_count=0,
+        success_rate=0.0,
+        last_tested_at=stamp,
+        created_at=stamp,
+        updated_at=stamp,
+    )
+    db.add(row)
+    for tool in tools:
+        db.add(m.McpTool(
+            id=new_id("mt-"),
+            server_id=row.id,
+            name=tool["name"],
+            key=tool["key"],
+            description=tool["description"],
+            enabled=True,
+        ))
+    await store_credential(db, "mcp_auth_header", row.id, payload.headers or "{}", suffix_of(payload.headers or "{}"))
+    await db.flush()
+    entity = await mcp_to_dict(db, row)
+    return await commit_write(db, entity, "接入 MCP 服务器", f"接入「{name}」，发现 {len(tools)} 个工具", resource_id=row.id)
+
+
+@router.get("/mcps/{mcp_id}", response_model=McpServer, summary="MCP 详情")
+async def get_mcp(
+    mcp_id: str,
+    db: AsyncSession = Depends(get_db),
+    _: m.Session = Depends(current_session),
+) -> dict:
+    return await mcp_to_dict(db, await get_or_404(db, m.McpServer, mcp_id))
+
+
+@router.get("/mcps/{mcp_id}/calls", summary="MCP 调用记录")
+async def mcp_calls(
+    mcp_id: str,
+    db: AsyncSession = Depends(get_db),
+    _: m.Session = Depends(current_session),
+) -> dict:
+    await get_or_404(db, m.McpServer, mcp_id)
+    rows = (
+        await db.scalars(select(m.McpCallRecord).where(m.McpCallRecord.server_id == mcp_id).order_by(m.McpCallRecord.timestamp.desc()))
+    ).all()
+    items = [
+        {
+            "id": str(row.id),
+            "toolKey": row.tool_key,
+            "runId": row.run_id,
+            "status": row.status,
+            "durationMs": row.duration_ms,
+            "timestamp": row.timestamp,
+        }
+        for row in rows
+    ]
+    return {"items": items, "total": len(items)}
+
+
+@router.patch("/mcps/{mcp_id}", response_model=WriteResponse, summary="保存 MCP 配置")
+async def update_mcp(
+    mcp_id: str,
+    payload: McpPatch,
+    db: AsyncSession = Depends(get_db),
+    _: m.Session = Depends(current_session),
+) -> dict:
+    row = await get_or_404(db, m.McpServer, mcp_id)
+    patch = payload.model_dump(exclude_unset=True)
+    if "name" in patch:
+        validate_blank(patch["name"], "名称与服务地址不能为空")
+    if "endpoint" in patch:
+        validate_blank(patch["endpoint"], "名称与服务地址不能为空")
+    if "headers" in patch:
+        validate_json_object(patch["headers"])
+    updates = to_row(patch, m.McpServer, aliases={"headers": "headers_enc"})
+    if "headers" in patch:
+        updates["headers_enc"] = write_headers(patch["headers"])
+    for column, value in updates.items():
+        setattr(row, column, value)
+    row.updated_at = now_iso()
+    await db.flush()
+    entity = await mcp_to_dict(db, row)
+    return await commit_write(db, entity, "保存 MCP 配置", f"更新 MCP {mcp_id} 的配置", resource_id=mcp_id)
+
+
+@router.patch("/mcps/{mcp_id}/enabled", response_model=WriteResponse, summary="启停 MCP")
+async def toggle_mcp(
+    mcp_id: str,
+    payload: EnabledPatch,
+    db: AsyncSession = Depends(get_db),
+    _: m.Session = Depends(current_session),
+) -> dict:
+    row = await get_or_404(db, m.McpServer, mcp_id)
+    row.enabled = payload.enabled
+    row.updated_at = now_iso()
+    await db.flush()
+    entity = await mcp_to_dict(db, row)
+    return await commit_write(
+        db, entity, "启用 MCP" if payload.enabled else "停用 MCP",
+        f"MCP {mcp_id} 已{'启用' if payload.enabled else '停用'}", resource_id=mcp_id,
+    )
+
+
+@router.patch("/mcps/{mcp_id}/tools/{tool_id}", response_model=WriteResponse, summary="启停 MCP 工具")
+async def toggle_mcp_tool(
+    mcp_id: str,
+    tool_id: str,
+    payload: EnabledPatch,
+    db: AsyncSession = Depends(get_db),
+    _: m.Session = Depends(current_session),
+) -> dict:
+    tool = await db.scalar(select(m.McpTool).where(m.McpTool.id == tool_id, m.McpTool.server_id == mcp_id))
+    if tool is None:
+        from app.core.errors import ApiException
+
+        raise ApiException("resource_not_found", "未找到该 MCP 工具", 404)
+    tool.enabled = payload.enabled
+    await db.flush()
+    entity = await mcp_to_dict(db, await get_or_404(db, m.McpServer, mcp_id))
+    await db.commit()
+    return {"entity": entity, "log": None}
+
+
+@router.patch("/mcps/{mcp_id}/usage", response_model=WriteResponse, summary="更新 MCP 调用额度")
+async def update_mcp_usage(
+    mcp_id: str,
+    payload: UsagePatch,
+    db: AsyncSession = Depends(get_db),
+    _: m.Session = Depends(current_session),
+) -> dict:
+    row = await get_or_404(db, m.McpServer, mcp_id)
+    row.qpm = payload.qpm
+    row.max_concurrency = payload.maxConcurrency
+    row.updated_at = now_iso()
+    await db.flush()
+    entity = await mcp_to_dict(db, row)
+    return await commit_write(
+        db, entity, "更新 MCP 使用配置",
+        f"调用额度 {payload.qpm}/分钟，最大并发 {payload.maxConcurrency}", resource_id=mcp_id,
+    )

@@ -1,110 +1,130 @@
-# Albedo · 通用企业智能体开发平台
+# Albedo · 智能体开发平台
 
-面向企业的 AI 智能体应用开发与运营平台（AgentOps），提供模型接入、Agent 应用、知识库（RAG）、MCP/Skill 工具、AGUI 协议对外接口与运营看板的一站式能力。
+面向个人用户的 AI 能力工作台（AgentOps），提供模型接入、Agent 编排与调试、MCP/Skills/内置工具资源池、AGUI 与标准对话 API 发布、全链路调用日志与工作区设置的一站式能力。
 
-## 技术栈
-
-| 层 | 选型 |
-|----|------|
-| 前端 | Vue 3.5 + TypeScript + Vite 6 + vue-router 4 + axios |
-| 后端 | Java 17 + Spring Boot 3.3 + MyBatis-Plus 3.5 + MySQL 8.0 + Redis |
-| AI 运行时 | OpenAI 兼容协议（腾讯混元 TokenHub / DeepSeek / OpenAI 等），自研 ReAct 循环 + SSE 事件流 |
-| 认证 | eyesUser 单点登录（`eyesAuth-spring-boot-starter`，`@Permission` 鉴权） |
-| 检索引擎 | 用户自配置向量库（Milvus/Qdrant/pgvector/Elasticsearch/自定义）与 ES，平台不内置实例（本地降级检索兜底） |
-
-## 目录结构
+## 仓库结构
 
 ```
 albedo/
-├── docs/                      # 需求文档 PRD v0.3 + 5 份技术设计 + SSO/Reranker/运维文档
-├── backend/                   # [后端] Spring Boot 服务
-│   ├── pom.xml
-│   ├── scripts/schema.sql     # 全量表 DDL（幂等，可重复执行）
-│   └── src/main/
-│       ├── java/com/albedo/   # common/config/auth/model/agent/kb/mcp/skill/overview/log
-│       └── resources/application.yml
-├── prototype/                 # [前端] Vue3 管理台（高保真 UI，已接入真实 API）
-│   ├── .env / .env.example
-│   └── src/{api,views,components,store,...}
-└── README.md
+├── frontend/            # React 前端工程（唯一数据来源：后端管理面 API）
+├── backend/             # Python 3.12 + FastAPI 管理面与对外网关后端（M0–M6 已实现）
+├── packages/contracts/  # OpenAPI 3.1 契约快照与生成脚本
+├── docs/                # 产品文档、原型截图与后端设计文档
+└── README.md            # 本文件
 ```
 
-## 快速启动
+## 文档导航
 
-### 1. 后端
+| 文档 | 内容 |
+| --- | --- |
+| `docs/智能体开发平台-产品文档.md` | 产品规格基线：信息架构、模块规则、日志规范、验收清单 |
+| `docs/原型截图索引.md` + `docs/screenshots/` | 40 张原型截图与视觉基准 |
+| `docs/后端系统架构设计.md` | Python / FastAPI / LangGraph 分层架构、组件选型、运行引擎与数据流向 |
+| `docs/后端接口文档.md` | 端点总表、核心接口定义、错误码体系与前端命令映射 |
+| `docs/后端实施计划.md` | 前后端对接改造清单、里程碑、验收标准与风险 |
+| `docs/运维信息.md` | 依赖服务与凭据注入说明（不含任何明文凭据，禁止写入仓库） |
+| `packages/contracts/openapi.json` | FastAPI 自动导出的 OpenAPI 3.1 管理面契约快照 |
+| `backend/README.md` | 后端启动、迁移、系统配置初始化与范围边界 |
 
-前置：JDK 17、Maven 3.9+，本地已 `mvn install` `eyesAuth-spring-boot-starter:1.1.0`，并确保可访问 MySQL/Redis。
+## 前端快速开始
+
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+浏览器访问 `http://localhost:5173`。其他脚本同样在 `frontend/` 下执行：
+
+```bash
+npm run typecheck   # TypeScript 类型检查
+npm run build       # 类型检查 + 生产构建
+npm run preview     # 预览生产构建
+npm run contracts   # 重新导出 OpenAPI 契约快照
+```
+
+### 数据来源与系统配置
+
+前端不存在演示模式，也没有本地持久化业务数据：所有资源、日志、统计、趋势、搜索结果与系统配置都来自 `/api/v1/**`。应用启动时校验会话并加载 `GET /api/v1/workspace/bootstrap` 全量快照，之后每次写操作都由服务端落库并即时更新状态。
+
+业务可调参数（枚举选项、新建资源默认值、各类限额、运行时参数、内置工具目录）存放在数据库 `system_configs` 表，由 `GET/PATCH /api/v1/settings/configs` 与 bootstrap 下发，可在「系统设置 → 系统配置」中修改。凭据、数据库连接、Redis、上游 Key 等部署配置仍由 `backend/.env` 注入，不进数据库、不下发浏览器。
+
+开发代理的后端地址可用 `ALBEDO_BACKEND_ORIGIN` 覆盖（见 `frontend/.env.example`），默认 `http://localhost:8000`；Vite 把 `/api`、`/v1` 代理到该地址。前端不需要任何业务凭据或演示 Key。
+
+## 后端快速开始
+
+后端采用 Python 3.12 + FastAPI + SQLAlchemy 2.0(async) + Alembic + MySQL 8.0 + Redis，详见 `backend/README.md`。
 
 ```bash
 cd backend
-# 初始化数据库（幂等）
-mysql -h <mysql_host> -P <port> -u <user> -p < scripts/schema.sql
-# 启动（默认连接运维信息中的 MySQL/Redis，eyesUser SSO 开启）
-mvn spring-boot:run
-# 或打包运行
-mvn -DskipTests package && java -jar target/albedo-server.jar
+uv sync                        # 生成 .venv 与 uv.lock
+cp .env.example .env           # 按 docs/运维信息.md 填写连接串（.env 已被忽略）
+python scripts/init_db.py      # 真实建表 + 写入系统配置与内置工具目录 + 逐表校验
+uv run uvicorn app.main:app --reload --port 8000
 ```
 
-后端默认监听 `8080`。
+可选后台任务：`uv run arq app.worker.WorkerSettings`（每日按保留周期清理日志并归档过期导出任务）。
 
-> **本地开发降级**：若 eyesUser Thrift（`119.29.213.134:9011`）不可达，可用 `--eyes-auth.enabled=false` 启动，鉴权回退到 `albedo.auth.dev-uid`（默认 10247），便于本地联调。
-
-### 2. 前端
+验证：
 
 ```bash
-cd prototype
-npm install
-cp .env.example .env   # 按需修改 VITE_API_DOMAIN
-npm run dev            # 默认 http://localhost:5173
+cd backend && PYTHONPATH=. uv run pytest -q
+cd frontend && npm run typecheck && npm run build
+bash packages/contracts/generate.sh --check
 ```
 
-## 关键配置（`backend/src/main/resources/application.yml`）
+实现范围为 M0–M6：契约、基础设施/认证/快照、四类资源、Agent 与发布配置、日志与治理、LangGraph 运行引擎、真实模型与 Redis checkpointer、标准对话/AGUI/模型透传对外网关，以及 SSRF、Skill 包校验、脱敏、签名下载与并发乐观锁等安全加固。模型连接测试、MCP 工具发现、工具调用与统计趋势均为真实链路，不存在离线模拟或预置演示数据。
 
-- **数据源**：`spring.datasource.*`（MySQL）
-- **缓存**：`spring.data.redis.*`
-- **演示 LLM**：`albedo.bootstrap.demo-llm-*`（首次登录自动接入一个演示模型）
-- **密钥加密**：`albedo.secret-key`（AES-GCM base64，生产务必更换）
-- **SSO**：`eyes-auth.*`（`app-id=albedo`、`auth-type=1`、`thrift.host/port`）
+## 对外 API
 
-前端环境变量（`prototype/.env`）：`VITE_API_DOMAIN`（后端地址）、`VITE_SSO_URL`（eyesUser 授权页）、`VITE_CLIENT_ID`（361925）。
+管理面 `/api/v1/**` 使用 Cookie 会话；对外面使用 `Authorization: Bearer <Key>`，两套鉴权链完全隔离。
 
-## 登录认证（eyesUser SSO）
+```bash
+# 标准对话 API（Agent Token）
+curl -X POST http://localhost:8000/v1/agents/{agentId}/chat \
+  -H 'Authorization: Bearer <Agent Token>' -H 'Content-Type: application/json' \
+  -d '{"messages":[{"role":"user","content":"你好"}]}'
 
-1. 未登录访问受保护页面 → 前端 302 跳转 `https://user.eyescode.top/OAuth2?clientId=361925&redirectUrl=...`；
-2. 用户授权后回跳携带 `?authorization=<jwt>` → 前端解析并存入 `localStorage`，清理 URL；
-3. 后续请求经 axios 拦截器在 `authorization` 请求头携带 token；
-4. 后端 `@Permission(PermissionEnum.USER)` 经 eyesAuth starter 校验 token，`UserInfoHolder.getUid()` 取当前用户做资源隔离（权限仅 NO/USER）；
-5. `type=1` 单 token 模式下，前端从响应头回写续期 token；错误码 `20000~20005` 统一清 token 跳登录。
+# AGUI 事件流（始终 SSE）
+curl -N -X POST http://localhost:8000/api/agui/v1/agents/{agentId}/run \
+  -H 'Authorization: Bearer <Agent Token>' -H 'Content-Type: application/json' \
+  -d '{"threadId":"thd_1","runId":"run_1","messages":[{"id":"m1","role":"user","content":"你好"}]}'
 
-## 对外 AGUI 协议（应用发布后）
-
-```
-POST /agui/apps/{app_id}/sessions              # 创建会话（返回 session_id）
-POST /agui/apps/{app_id}/chat                  # 对话（SSE 事件流）
-GET  /agui/apps/{app_id}/sessions/{sid}/messages
-POST /agui/apps/{app_id}/sessions/{sid}/interrupt
+# 已发布模型（OpenAI 兼容）
+curl http://localhost:8000/v1/models -H 'Authorization: Bearer <Publication Key>'
 ```
 
-- 鉴权：`Authorization: Bearer <JWT>`，业务方用应用 Jwt Key（HS256）自签，平台仅验签；
-- 限流：按应用 QPM（`application.qpm`）Redis 固定窗口计数；
-- 会话完全匿名，以 `app_id + session_id` 隔离；
-- 事件：`RUN_STARTED/FINISHED/ERROR`、`TEXT_MESSAGE_START/CONTENT/END`、`TOOL_CALL_START/ARGS/END`、`STEP_STARTED/FINISHED`。
+Token 在管理面「智能体 → 发布」与「模型 → 发布版本」中签发或重置，完整值只在创建/重置响应出现一次；日志与导出仅保留后缀。
 
-管理侧 RESTful 接口统一前缀 `/v1/**`（eyesUser 鉴权）：`/v1/apps`、`/v1/models`、`/v1/knowledge-bases`、`/v1/vector-stores`、`/v1/elasticsearch-configs`、`/v1/mcp-servers`、`/v1/skills`、`/v1/operation-logs`、`/v1/overview`、`/v1/me`。统一响应 `{ code, message, data, requestId }`。
+## 登录
 
-## 降级实现说明（MVP）
+访问 Key 由后端 `DEMO_ACCESS_KEY` 环境变量注入（本机 `backend/.env`），前端不预填、不保存任何 Key。登录请求提交到服务端用 Argon2id 校验，Redis 记失败次数，成功下发 HttpOnly Cookie 会话；明文 Key 与凭证表内容不下发到浏览器，bootstrap 只返回 `accessKeySuffix`。生产环境会拒绝公开演示值，详见 `docs/运维信息.md`。
 
-- **LLM**：OpenAI 兼容协议直连（腾讯混元等），真实推理；模型健康检查为直连 HTTP 探测（回显请求/响应/耗时）。
-- **向量库 / Elasticsearch / OCR**：平台不内置实例，提供适配层与本地降级（知识库检索降级为本地关键词匹配），保证无真实实例时全链路可启动、可跑通。
-- **MCP**：Streamable HTTP JSON-RPC（initialize/tools/list/tools/call）适配；SSE 传输或目标不可达时优雅降级。
+可在「系统设置 → 访问与安全」中修改；退出登录会撤销服务端会话，业务数据保留在数据库。
 
-## 重要提示：腾讯混元 Key 已失效
+## 功能地图
 
-运维信息中的混元 API Key 为旧平台 Key，混元已迁移至 **TokenHub**（旧模型 `hunyuan-turbo` 等已下线）。当前默认演示模型为 `hy3-preview`（base_url `https://tokenhub.tencentmaas.com/v1`）。**需到 [TokenHub 控制台](https://console.cloud.tencent.com/tokenhub/apikey) 申请新 API Key**，替换 `application.yml` 中 `albedo.bootstrap.demo-llm-api-key` 后即可真实推理。也可直接接入任意 OpenAI 兼容服务（DeepSeek / OpenAI 等）。
+| 路由 | 页面 |
+| --- | --- |
+| `/login` | 访问 Key 登录 |
+| `/` | 概览：指标、调用趋势、资源状态、最近活动、快捷入口 |
+| `/agents` | 智能体列表：搜索、状态与默认模型组合筛选、创建 |
+| `/agents/:agentId` | 三栏编辑器（基础信息 / 提示词 / 模型设置 / 能力挂载 / 高级设置）、测试会话、对话历史、发布 |
+| `/resources/mcp` | MCP 接入、真实连接测试与工具发现、四 Tab 详情抽屉与工具启停 |
+| `/resources/skills` | Skill 拖拽上传、详情抽屉与版本记录 |
+| `/resources/tools` | 内置工具查看与真实调用次数、全局启停（含影响清单确认） |
+| `/resources/models` | 模型接入、真实上游探测、配置抽屉与多版本发布 |
+| `/logs` | 服务端分页筛选、执行链路详情与真实异步导出 |
+| `/settings` | 常规设置、系统配置、访问 Key 与日志保留策略 |
 
-## 更多文档
+全局组件：分组侧栏、吸顶面包屑顶栏、`⌘/Ctrl + K` 全局搜索、通知面板、帮助弹窗与右上角 Toast。
 
-- 需求文档：`docs/智能体开发平台-需求文档.md`
-- 技术设计：`docs/技术设计-{智能体,MCP,知识库,Skill}模块.md`
-- SSO 接入：`docs/耶瞳用户中心接入文档.md`
-- 后端配置与接口：`backend/README.md`
+## 数据说明
+
+- 初始化只写入系统必需数据：工作区设置行、`system_configs` 配置、管理面访问 Key 与内置工具目录；不预置任何智能体、模型、MCP、Skill、日志、趋势或通知。
+- 调用趋势由 `log_entries` 按自然日真实聚合；内置工具调用次数、MCP 调用记录与成功率由每次真实工具执行写入；通知由失败事件、发布成功等真实业务事件生成。
+- 日志导出在创建任务时真实生成文件并写入审计日志；下载链接使用服务端签名，有效期来自系统配置。
+- 服务端分页、筛选、全局搜索、统计与执行链路全部查询 MySQL；前端不缓存业务数据到 localStorage，刷新后由 bootstrap 重新加载。
+- 所有创建、编辑、启停、发布、测试、导出操作即时生效并持久化在数据库。
+
+设计基线见 `docs/智能体开发平台-产品文档.md` 与 `docs/原型截图索引.md`。

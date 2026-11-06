@@ -1,0 +1,45 @@
+[project]
+name = "albedo-backend"
+version = "0.1.0"
+description = "Albedo AgentOps platform backend management plane (M0-M4)"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+  "fastapi>=0.115.6,<1",
+  "uvicorn[standard]>=0.34,<1",
+  "pydantic>=2.10,<3",
+  "pydantic-settings>=2.7,<3",
+  "sqlalchemy[asyncio]>=2.0.36,<3",
+  "alembic>=1.14,<2",
+  "aiomysql>=0.2.0,<1",
+  "redis>=5.2,<7",
+  "arq>=0.26,<1",
+  "argon2-cffi>=23.1,<25",
+  "cryptography>=44,<46",
+  "structlog>=24.4,<26",
+  "httpx>=0.28,<1",
+  "python-multipart>=0.0.20,<1",
+  "langgraph>=0.6,<2",
+  "langchain-core>=0.3,<2",
+  "jinja2>=3.1,<4",
+  "langchain-openai>=0.3,<2",
+  "langgraph-checkpoint-redis>=0.3,<2",
+  "langchain-mcp-adapters>=0.2,<2",
+  "mcp>=1.9,<2",
+  "pypdf>=6.21.4",
+  "python-docx>=1.2.0",
+  "openpyxl>=3.1.5",
+]
+
+[dependency-groups]
+dev = [
+  "pytest>=8.3,<10",
+  "pytest-asyncio>=0.24,<1",
+  "schemathesis>=3.38,<4",
+  "anyio>=4,<5",
+]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "session"
+asyncio_default_test_loop_scope = "session"
+testpaths = ["tests"]
