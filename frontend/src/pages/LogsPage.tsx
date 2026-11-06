@@ -89,14 +89,33 @@ export function LogsPage() {
   const runIdParam = params.get('runId')
   useEffect(() => {
     if (!runIdParam) return
-    const match = data.logs.find((log) => log.runId === runIdParam)
-    if (match) {
-      const next = new URLSearchParams(params)
-      next.set('logId', match.logId)
-      next.delete('runId')
-      setParams(next, { replace: true })
+    let canceled = false
+    // runId → logId 必须走服务端查询：前端快照只保留最近若干条日志，
+    // 更早的运行不在快照里，会让深链静默失效。
+    adminApi.logs
+      .query({ page: 1, pageSize: 1, runId: runIdParam, range: '1y' })
+      .then((result) => {
+        if (canceled) return
+        const match = result.items[0]
+        setParams((current) => {
+          const next = new URLSearchParams(current)
+          if (match) next.set('logId', match.logId)
+          next.delete('runId')
+          return next
+        }, { replace: true })
+      })
+      .catch(() => {
+        if (canceled) return
+        setParams((current) => {
+          const next = new URLSearchParams(current)
+          next.delete('runId')
+          return next
+        }, { replace: true })
+      })
+    return () => {
+      canceled = true
     }
-  }, [runIdParam, data.logs])
+  }, [runIdParam, setParams])
 
   const openDetail = (id: string) => {
     const next = new URLSearchParams(params)

@@ -160,6 +160,7 @@ class RuntimeEngine:
         *,
         usage: dict[str, int] | None = None,
         streamed_message_id: str = "",
+        error: "ApiException | None" = None,
     ) -> RuntimeResult:
         usage = dict(usage or {})
         if not usage.get("totalTokens"):
@@ -175,7 +176,7 @@ class RuntimeEngine:
                     break
         logs = self._build_logs(
             request, ctx["snapshot"], ctx["collector"], duration_ms, finish_reason,
-            usage, ctx["missing"], ctx["max_tool_calls"],
+            usage, ctx["missing"], ctx["max_tool_calls"], error=error,
         )
         return RuntimeResult(
             run_id=request.run_id,
@@ -205,9 +206,10 @@ class RuntimeEngine:
             return {"messages": values.get("messages", []), "finish_reason": "timeout", "usage": values.get("usage") or {}}
 
     async def run(self, request: RuntimeRequest) -> RuntimeResult:
-        ctx = await self._prepare_run(request, streaming=False)
         started = time.perf_counter()
+        ctx: dict[str, Any] | None = None
         try:
+            ctx = await self._prepare_run(request, streaming=False)
             try:
                 final = await self._ainvoke(ctx)
             except Exception as exc:  # noqa: BLE001
@@ -217,10 +219,8 @@ class RuntimeEngine:
                 ctx = await self._prepare_run(request, streaming=False, retried=True)
                 final = await self._ainvoke(ctx)
         except Exception as exc:  # noqa: BLE001
-            mapped = map_upstream_error(exc)
-            if mapped is not None:
-                raise mapped from exc
-            raise
+            duration_ms = int((time.perf_counter() - started) * 1000)
+            raise self._failure(request, ctx, exc, duration_ms) from exc
         duration_ms = int((time.perf_counter() - started) * 1000)
         finish_reason = str(final.get("finish_reason") or "stop")
         return self._build_result(
@@ -228,10 +228,75 @@ class RuntimeEngine:
             usage=dict(final.get("usage") or {}),
         )
 
+    # 输入校验类错误不产生运行日志，避免无效请求刷屏。
+    SKIP_FAILURE_LOG_CODES = {"missing_variable"}
+
+    def _failure(
+        self,
+        request: RuntimeRequest,
+        ctx: dict[str, Any] | None,
+        exc: BaseException,
+        duration_ms: int,
+    ) -> ApiException:
+        """把任意异常统一成 ApiException，并附带可供落库的失败日志。"""
+        if isinstance(exc, ApiException):
+            failure = exc
+        else:
+            failure = map_upstream_error(exc) or ApiException(
+                "agent_run_failed", f"运行失败：{str(exc)[:200]}", 500
+            )
+        failure.duration_ms = duration_ms
+        if failure.code in self.SKIP_FAILURE_LOG_CODES:
+            failure.logs = []
+            return failure
+        if ctx is not None:
+            failure.logs = self._build_logs(
+                request, ctx["snapshot"], ctx["collector"], duration_ms, "failed",
+                {}, ctx["missing"], ctx["max_tool_calls"], error=failure,
+            )
+        else:
+            # 图尚未构建就失败（如上游凭据缺失），此时仍要留下一条会话级失败日志。
+            failure.logs = [self._prepare_failure_log(request, failure, duration_ms)]
+        return failure
+
+    @staticmethod
+    def _prepare_failure_log(request: RuntimeRequest, error: ApiException, duration_ms: int) -> dict[str, Any]:
+        agent_name = str(request.snapshot.get("name") or "智能体")
+        label = SOURCE_LABELS.get(request.source, "测试会话")
+        summary = request.content if len(request.content) <= 60 else f"{request.content[:60]}…"
+        return make_log_entry(
+            f"{agent_name} / {label}",
+            summary,
+            log_type="session",
+            source=request.source,
+            status="failed",
+            runId=request.run_id,
+            threadId=request.thread_id,
+            agentId=request.agent_id,
+            durationMs=duration_ms,
+            inputSummary=json.dumps({"message": request.content}, ensure_ascii=False),
+            outputSummary=f"errorCode: {error.code}：{error.message[:120]}",
+            errorCode=error.code,
+            errorMessage=error.message,
+        )
+
     async def run_stream(self, request: RuntimeRequest) -> AsyncIterator[dict[str, Any]]:
         """真流式运行：token / 工具事件实时产出，结束后附带完整 RuntimeResult。"""
-        ctx = await self._prepare_run(request, streaming=True)
         started = time.perf_counter()
+        try:
+            ctx = await self._prepare_run(request, streaming=True)
+        except Exception as exc:  # noqa: BLE001
+            duration_ms = int((time.perf_counter() - started) * 1000)
+            error = self._failure(request, None, exc, duration_ms)
+            yield {
+                "type": "run_error",
+                "code": error.code,
+                "message": error.message,
+                "result": None,
+                "logs": error.logs,
+                "durationMs": duration_ms,
+            }
+            return
         message_id = ""
         message_open = False
         produced = False
@@ -330,7 +395,7 @@ class RuntimeEngine:
         if error is not None:
             result = self._build_result(
                 request, ctx, messages, finish_reason, duration_ms,
-                usage=usage, streamed_message_id=message_id,
+                usage=usage, streamed_message_id=message_id, error=error,
             )
             yield {"type": "run_error", "code": error.code, "message": error.message, "result": result}
             return
@@ -573,6 +638,7 @@ class RuntimeEngine:
         usage: dict[str, int],
         missing: list[str],
         max_tool_calls: int,
+        error: "ApiException | None" = None,
     ) -> list[dict[str, Any]]:
         logs: list[dict[str, Any]] = []
         index = 0
@@ -619,6 +685,8 @@ class RuntimeEngine:
             notes.append(f"缺失变量以空值兜底：{', '.join(missing)}")
         if finish_reason == "timeout":
             notes.append("运行超过 maxRunSeconds，已取消图执行")
+        if error is not None:
+            notes.append(f"errorCode: {error.code}：{error.message[:120]}")
         agent_name = str(snapshot.get("name") or "智能体")
         label = SOURCE_LABELS.get(request.source, "测试会话")
         session_log = make_log_entry(
@@ -634,6 +702,8 @@ class RuntimeEngine:
             tokenUsage=usage,
             inputSummary=json.dumps({"message": request.content}, ensure_ascii=False),
             outputSummary="；".join(notes),
+            errorCode=error.code if error is not None else None,
+            errorMessage=error.message if error is not None else None,
         )
         logs.append(session_log)
         return logs

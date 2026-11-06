@@ -25,18 +25,21 @@ export function CreateMcpDialog({ open, onClose }: { open: boolean; onClose: () 
   const [testing, setTesting] = useState(false)
   const [saving, setSaving] = useState(false)
   const [testResult, setTestResult] = useState('')
+  const [testTools, setTestTools] = useState<string[]>([])
   const [error, setError] = useState('')
 
   useEffect(() => {
     if (!open) return
     setForm(emptyForm(config))
     setTestResult('')
+    setTestTools([])
     setError('')
   }, [open, config])
 
   const update = (patch: Partial<McpDraft>) => {
     setForm((current) => ({ ...current, ...patch, tested: false }))
     setTestResult('')
+    setTestTools([])
     setError('')
   }
 
@@ -47,7 +50,8 @@ export function CreateMcpDialog({ open, onClose }: { open: boolean; onClose: () 
     api.mcp
       .test(form)
       .then((result) => {
-        setTestResult(`连接成功，发现 ${result.toolCount} 个可用工具`)
+        setTestResult(`连接成功，发现 ${result.toolCount} 个可用工具 · 延迟 ${result.latencyMs} ms`)
+        setTestTools(result.tools.map((tool) => tool.name))
         setForm((current) => ({ ...current, tested: true }))
         toast.success('连接测试成功')
       })
@@ -129,9 +133,19 @@ export function CreateMcpDialog({ open, onClose }: { open: boolean; onClose: () 
         </div>
 
         {testResult && (
-          <p className="flex items-center gap-2 rounded-field bg-ok/10 px-3 py-2 text-xs text-ok">
-            <CheckCircle2 className="h-3.5 w-3.5" />{testResult}
-          </p>
+          <div className="rounded-field bg-ok/10 px-3 py-2">
+            <p className="flex items-center gap-2 text-xs text-ok">
+              <CheckCircle2 className="h-3.5 w-3.5" />{testResult}
+            </p>
+            {testTools.length > 0 && (
+              <div className="mt-2 flex flex-wrap gap-1">
+                {testTools.slice(0, 8).map((name) => (
+                  <code key={name} className="rounded bg-white/70 px-1.5 py-0.5 font-mono text-2xs text-ok">{name}</code>
+                ))}
+                {testTools.length > 8 && <span className="text-2xs text-ok">等 {testTools.length} 个工具</span>}
+              </div>
+            )}
+          </div>
         )}
         {error && <p className="field-error" role="alert">{error}</p>}
         <div className="flex items-start gap-2 rounded-field bg-canvas px-3 py-2.5 text-2xs leading-relaxed text-ink-muted">

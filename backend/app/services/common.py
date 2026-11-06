@@ -2,14 +2,14 @@ import json
 from typing import Any
 from urllib.parse import urlparse
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import ApiException
 from app.core.security import decrypt_secret, encrypt_secret, hash_secret, now_iso, suffix_of
 from app.db import models as m
 from app.services.audit import audit
-from app.services.snapshot import row_dict
+from app.services.snapshot import row_dict, tool_schema_dict
 
 
 def validate_name(value: str, label: str = "名称", max_length: int = 50) -> str:
@@ -81,7 +81,13 @@ async def mcp_to_dict(session: AsyncSession, row: m.McpServer) -> dict[str, Any]
     data = row_dict(row, rename={"headers_enc": "headers"})
     data["headers"] = read_headers(row.headers_enc)
     tools = (await session.scalars(select(m.McpTool).where(m.McpTool.server_id == row.id).order_by(m.McpTool.id))).all()
-    data["tools"] = [row_dict(item, drop={"server_id"}) for item in tools]
+    data["tools"] = [
+        {
+            **row_dict(item, drop={"server_id", "input_schema"}),
+            "inputSchema": tool_schema_dict(item.input_schema),
+        }
+        for item in tools
+    ]
     return data
 
 
@@ -93,6 +99,15 @@ async def skill_to_dict(session: AsyncSession, row: m.Skill) -> dict[str, Any]:
         )
     ).all()
     data["versions"] = [row_dict(item, drop={"id", "skill_id", "file_path", "manifest"}) for item in versions]
+    # 引用数由挂载关系实时统计，不复用库内可能过期的 referenced_by 计数。
+    data["referencedBy"] = int(
+        await session.scalar(
+            select(func.count())
+            .select_from(m.AgentMount)
+            .where(m.AgentMount.kind == "skill", m.AgentMount.resource_id == row.id)
+        )
+        or 0
+    )
     return data
 
 

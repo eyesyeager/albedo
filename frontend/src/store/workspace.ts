@@ -7,6 +7,7 @@ import type {
   ExportTask,
   LogEntry,
   McpServer,
+  McpToolInputSchema,
   ModelPublication,
   ModelResource,
   Skill,
@@ -30,6 +31,7 @@ interface WorkspaceStore extends WorkspaceData {
   upsertMcp: (mcp: McpServer) => void
   patchMcp: (id: string, patch: Partial<McpServer>) => void
   patchMcpTool: (mcpId: string, toolId: string, enabled: boolean) => void
+  patchMcpToolSchema: (mcpId: string, toolId: string, inputSchema: McpToolInputSchema) => void
   addSkill: (skill: Skill) => void
   patchSkill: (id: string, patch: Partial<Skill>) => void
   patchTool: (id: string, patch: Partial<BuiltinTool>) => void
@@ -108,6 +110,14 @@ export const useWorkspace = create<WorkspaceStore>()((set) => ({
       mcps: state.mcps.map((mcp) =>
         mcp.id === mcpId
           ? { ...mcp, tools: mcp.tools.map((tool) => (tool.id === toolId ? { ...tool, enabled } : tool)) }
+          : mcp,
+      ),
+    })),
+  patchMcpToolSchema: (mcpId, toolId, inputSchema) =>
+    set((state) => ({
+      mcps: state.mcps.map((mcp) =>
+        mcp.id === mcpId
+          ? { ...mcp, tools: mcp.tools.map((tool) => (tool.id === toolId ? { ...tool, inputSchema } : tool)) }
           : mcp,
       ),
     })),

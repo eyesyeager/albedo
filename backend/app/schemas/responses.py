@@ -35,6 +35,7 @@ class WriteResponse(DomainModel):
     logs: list[LogEntry] | None = None
     downloadUrl: str | None = None
     latencyMs: int | None = None
+    toolCount: int | None = None
 
 
 class OkResponse(DomainModel):

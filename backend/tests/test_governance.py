@@ -27,6 +27,12 @@ async def test_logs_query_and_chain(client: AsyncClient) -> None:
     keyword = await client.get("/api/v1/logs", params={"keyword": "深度研究助手", "range": "1y"})
     assert keyword.json()["total"] >= 1
 
+    # 深链依赖服务端按 runId 精确查询，不能只看前端快照。
+    by_run = await client.get("/api/v1/logs", params={"runId": "run_8fk2m1", "range": "1y"})
+    assert by_run.status_code == 200
+    assert by_run.json()["total"] >= 3
+    assert all(item["runId"] == "run_8fk2m1" for item in by_run.json()["items"])
+
     detail = await client.get("/api/v1/logs/log-1001")
     assert detail.status_code == 200
     assert len(detail.json()["chain"]) >= 3

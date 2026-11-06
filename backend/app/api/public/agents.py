@@ -8,7 +8,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.public.deps import require_agent
-from app.api.public.runtime import execute_agent_run, persist_result, prepare_agent_run
+from app.api.public.runtime import execute_agent_run, persist_failure_logs, persist_result, prepare_agent_run
 from app.core.errors import ApiException
 from app.core.ratelimit import allow_qpm
 from app.core.security import new_id, now_iso
@@ -106,6 +106,14 @@ async def chat_stream(db: AsyncSession, agent: m.Agent, runtime_request: Any, sn
                 result = engine_event.get("result")
                 if result is not None:
                     await persist_result(db, agent, result, snapshot, "standard_api")
+                else:
+                    # 图尚未开始就失败（如上游凭据缺失），仍要落一条失败审计日志。
+                    await persist_failure_logs(
+                        db, agent, runtime_request,
+                        list(engine_event.get("logs") or []),
+                        int(engine_event.get("durationMs") or 0),
+                        snapshot,
+                    )
                 if kind == "run_error":
                     pending_error = {
                         "type": "message.error",
@@ -188,6 +196,13 @@ async def agui_stream(db: AsyncSession, agent: m.Agent, runtime_request: Any, sn
                 result = engine_event.get("result")
                 if result is not None:
                     await persist_result(db, agent, result, snapshot, "agui")
+                else:
+                    await persist_failure_logs(
+                        db, agent, runtime_request,
+                        list(engine_event.get("logs") or []),
+                        int(engine_event.get("durationMs") or 0),
+                        snapshot,
+                    )
             for payload in to_agui_events(engine_event):
                 event = await emit(payload)
                 yield sse(event["type"], event)

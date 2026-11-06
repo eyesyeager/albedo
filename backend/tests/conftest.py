@@ -1,4 +1,5 @@
 import importlib
+import json
 
 import pytest
 from httpx import ASGITransport, AsyncClient
@@ -65,13 +66,32 @@ def upstream_probes(monkeypatch):
         if str(draft.get("transport")) != "stdio":
             assert_no_private_ip(endpoint)
         return [
-            {"name": "search", "key": "search", "description": "检索"},
-            {"name": "fetch", "key": "fetch", "description": "读取"},
-            {"name": "list", "key": "list", "description": "列举"},
+            {
+                "name": "search", "key": "search", "description": "检索",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "query": {"type": "string", "description": "检索关键词"},
+                        "limit": {"type": "integer", "description": "返回条数", "default": 5},
+                    },
+                    "required": ["query"],
+                },
+            },
+            {"name": "fetch", "key": "fetch", "description": "读取", "inputSchema": {"type": "object", "properties": {}}},
+            {"name": "list", "key": "list", "description": "列举", "inputSchema": {"type": "object", "properties": {}}},
         ]
+
+    async def call_tool(self, server, tool_key, arguments, timeout=30.0):
+        return {
+            "status": "success",
+            "durationMs": 12,
+            "output": f'{tool_key}:{json.dumps(arguments, ensure_ascii=False)}',
+            "error": None,
+        }
 
     monkeypatch.setattr(gateway.ModelGateway, "test_connection", test_connection)
     monkeypatch.setattr(gateway.McpGateway, "discover_tools", discover_tools)
+    monkeypatch.setattr(gateway.McpGateway, "call_tool", call_tool)
 
 
 @pytest.fixture

@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { ArrowLeft, Bot, Play, Save } from 'lucide-react'
-import type { Agent } from '../types/domain'
+import type { Agent, LogEntry } from '../types/domain'
 import { formatRelative } from '../lib/format'
 import { api } from '../lib/api'
 import { asError } from '../lib/errors'
@@ -35,7 +35,34 @@ export function AgentDetailPage() {
   const [focusSignal, setFocusSignal] = useState(0)
   const [saving, setSaving] = useState(false)
   const [testModelId, setTestModelId] = useState('')
+  const [history, setHistory] = useState<LogEntry[]>([])
+  const [historyLoading, setHistoryLoading] = useState(false)
+  const [historyError, setHistoryError] = useState('')
+  const [historyVersion, setHistoryVersion] = useState(0)
   const blocker = useUnsavedGuard(dirty)
+
+  useEffect(() => {
+    let canceled = false
+    // 先展示快照中的同 Agent 会话，再由服务端历史覆盖，避免只统计最近 50 条日志。
+    setHistory(agentSessions({ logs: useWorkspace.getState().logs }, agentId))
+    setHistoryLoading(true)
+    setHistoryError('')
+    api.agents
+      .history(agentId)
+      .then((result) => {
+        if (!canceled) setHistory(result.items)
+      })
+      .catch((reason: unknown) => {
+        if (canceled) return
+        setHistoryError(asError(reason).message)
+      })
+      .finally(() => {
+        if (!canceled) setHistoryLoading(false)
+      })
+    return () => {
+      canceled = true
+    }
+  }, [agentId, historyVersion, data.logs.length])
 
   useEffect(() => {
     const current = useWorkspace.getState().agents.find((item) => item.id === agentId)
@@ -89,7 +116,7 @@ export function AgentDetailPage() {
     )
   }
 
-  const historyCount = agentSessions({ logs: data.logs }, agentId).length
+  const historyCount = history.length
   const panelProps = { draft, onChange: change }
 
   return (
@@ -139,7 +166,14 @@ export function AgentDetailPage() {
         </div>
       )}
 
-      {tab === 'history' && <HistoryTab agentId={agentId} />}
+      {tab === 'history' && (
+        <HistoryTab
+          items={history}
+          loading={historyLoading}
+          error={historyError}
+          onRefresh={() => setHistoryVersion((value) => value + 1)}
+        />
+      )}
       {tab === 'publish' && <PublishTab agentId={agentId} dirty={dirty} />}
 
       <ConfirmDialog

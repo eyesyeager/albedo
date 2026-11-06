@@ -20,6 +20,7 @@ class McpTool(DomainModel):
     name: str
     key: str
     description: str
+    inputSchema: dict[str, Any] = Field(default_factory=dict)
     enabled: bool
 
 
@@ -300,6 +301,17 @@ class TestConnectionResult(DomainModel):
 class ToolDiscoveryResult(DomainModel):
     toolCount: int
     tools: list[dict[str, Any]] = Field(default_factory=list)
+    latencyMs: int = 0
+
+
+class McpToolTestResult(DomainModel):
+    toolKey: str
+    status: Literal["success", "failed"]
+    durationMs: int
+    output: str = ""
+    error: str | None = None
+    timestamp: str
+    log: LogEntry | None = None
 
 
 class ExportTaskAccepted(DomainModel):

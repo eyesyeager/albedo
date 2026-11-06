@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { AlertTriangle, CheckCircle2, Clock3 } from 'lucide-react'
+import { AlertTriangle, CheckCircle2, Clock3, Play, Zap } from 'lucide-react'
 import { formatDateTime, formatDuration } from '../../lib/format'
 import { api } from '../../lib/api'
 import { asError } from '../../lib/errors'
@@ -9,6 +9,7 @@ import { affectedAgents } from '../../store/selectors'
 import { Button, ConfirmDialog, Drawer, EmptyState, Field, Input, Select, Switch, Tabs, Textarea, toast } from '../../components/ui'
 import { RunStatusBadge } from '../../components/common/StatusBadge'
 import { TRANSPORT_LABEL } from './McpCard'
+import { McpToolTestDialog } from './McpToolTestDialog'
 
 export type McpTab = 'general' | 'tools' | 'usage' | 'calls'
 
@@ -23,6 +24,10 @@ export function McpDetailDrawer({ mcpId, initialTab, onClose }: { mcpId: string 
   const [concurrency, setConcurrency] = useState(defaults.maxConcurrency)
   const [saving, setSaving] = useState(false)
   const [confirmDisable, setConfirmDisable] = useState(false)
+  const [testingConnection, setTestingConnection] = useState(false)
+  const [connectionResult, setConnectionResult] = useState<{ toolCount: number; latencyMs: number; at: string } | null>(null)
+  const [connectionError, setConnectionError] = useState('')
+  const [toolTestId, setToolTestId] = useState<string | null>(null)
 
   useEffect(() => setTab(initialTab), [mcpId, initialTab])
   useEffect(() => {
@@ -31,6 +36,12 @@ export function McpDetailDrawer({ mcpId, initialTab, onClose }: { mcpId: string 
     setForm({ name: current.name, description: current.description, endpoint: current.endpoint, enabled: current.enabled })
     setQpm(current.qpm)
     setConcurrency(current.maxConcurrency)
+  }, [mcpId])
+
+  useEffect(() => {
+    setConnectionResult(null)
+    setConnectionError('')
+    setToolTestId(null)
   }, [mcpId])
 
   if (!mcp) return null
@@ -70,6 +81,25 @@ export function McpDetailDrawer({ mcpId, initialTab, onClose }: { mcpId: string 
       .finally(() => setSaving(false))
   }
 
+  const testConnection = () => {
+    if (testingConnection) return
+    setTestingConnection(true)
+    setConnectionError('')
+    api.mcp
+      .testExisting(mcp.id)
+      .then((result) => {
+        setConnectionResult({ ...result, at: new Date().toISOString() })
+        toast.success(`连接正常，发现 ${result.toolCount} 个工具`)
+      })
+      .catch((reason: unknown) => {
+        const message = asError(reason).message
+        console.error('[albedo] MCP 连接测试失败：', message)
+        setConnectionError(message)
+        toast.error(message)
+      })
+      .finally(() => setTestingConnection(false))
+  }
+
   const calls = data.logs.filter((log) => log.resourceId === mcp.id && log.type === 'mcp').slice(0, 10)
 
   return (
@@ -107,6 +137,38 @@ export function McpDetailDrawer({ mcpId, initialTab, onClose }: { mcpId: string 
           <Field label="连接类型" hint="创建后不可直接编辑；如需切换请新建服务并重新测试连接">
             <Select aria-label="连接类型" value={mcp.transport} disabled options={Object.entries(TRANSPORT_LABEL).map(([value, label]) => ({ value, label }))} />
           </Field>
+          <div className="rounded-field border border-line px-3 py-3">
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <p className="text-xs font-medium text-ink">连接测试</p>
+                <p className="mt-0.5 text-2xs leading-relaxed text-ink-faint">
+                  使用已保存的地址与请求头发起真实工具发现，成功后同步工具清单并刷新连接状态
+                </p>
+              </div>
+              <Button
+                variant="outline"
+                size="sm"
+                icon={<Zap className="h-3.5 w-3.5" />}
+                loading={testingConnection}
+                onClick={testConnection}
+              >
+                测试连接
+              </Button>
+            </div>
+            {connectionResult && (
+              <p className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 rounded-field bg-ok/10 px-2.5 py-1.5 text-2xs text-ok">
+                <CheckCircle2 className="h-3.5 w-3.5" />
+                <span>连接正常</span>
+                <span className="tabular-nums">工具 {connectionResult.toolCount} 个</span>
+                <span className="tabular-nums">延迟 {connectionResult.latencyMs} ms</span>
+                <span className="tabular-nums text-ink-faint">{formatDateTime(connectionResult.at)}</span>
+              </p>
+            )}
+            {connectionError && <p className="mt-2 text-2xs leading-relaxed text-danger" role="alert">{connectionError}</p>}
+            {!connectionResult && !connectionError && mcp.lastTestedAt && (
+              <p className="mt-2 text-2xs text-ink-faint">最近测试：{formatDateTime(mcp.lastTestedAt)}</p>
+            )}
+          </div>
           <div className="flex items-center justify-between rounded-field border border-line px-3 py-2.5">
             <div>
               <p className="text-xs font-medium text-ink">启用状态</p>
@@ -127,13 +189,23 @@ export function McpDetailDrawer({ mcpId, initialTab, onClose }: { mcpId: string 
                 <code className="font-mono text-2xs text-brand">{tool.key}</code>
                 <p className="mt-1 text-2xs leading-relaxed text-ink-muted">{tool.description}</p>
               </div>
-              <Switch
-                label={`${tool.name} 启用开关`}
-                checked={tool.enabled}
-                onChange={(checked) => {
-                  api.mcp.toggleTool(mcp.id, tool.id, checked).then(() => toast.success(`工具「${tool.name}」已${checked ? '启用' : '停用'}`))
-                }}
-              />
+              <div className="flex shrink-0 items-center gap-1.5">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  icon={<Play className="h-3.5 w-3.5" />}
+                  onClick={() => setToolTestId(tool.id)}
+                >
+                  调用测试
+                </Button>
+                <Switch
+                  label={`${tool.name} 启用开关`}
+                  checked={tool.enabled}
+                  onChange={(checked) => {
+                    api.mcp.toggleTool(mcp.id, tool.id, checked).then(() => toast.success(`工具「${tool.name}」已${checked ? '启用' : '停用'}`))
+                  }}
+                />
+              </div>
             </div>
           ))}
         </div>
@@ -183,6 +255,14 @@ export function McpDetailDrawer({ mcpId, initialTab, onClose }: { mcpId: string 
           </div>
         )
       )}
+
+      <McpToolTestDialog
+        mcpId={mcp.id}
+        mcpName={mcp.name}
+        tool={mcp.tools.find((item) => item.id === toolTestId) ?? null}
+        timeoutSeconds={mcp.timeoutSeconds}
+        onClose={() => setToolTestId(null)}
+      />
 
       <ConfirmDialog
         open={confirmDisable}

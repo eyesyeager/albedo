@@ -161,6 +161,7 @@ class McpTool(Base):
     name: Mapped[str] = mapped_column(String(128))
     key: Mapped[str] = mapped_column(String(128))
     description: Mapped[str] = mapped_column(Text, default="")
+    input_schema: Mapped[str | None] = mapped_column(Text, nullable=True)
     enabled: Mapped[bool] = mapped_column(Boolean, default=True)
 
 

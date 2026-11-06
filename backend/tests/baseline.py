@@ -1,6 +1,7 @@
 """集成测试固定基线。
 
-只用于 pytest：每个用例开始前把业务表重置为一组确定的行，保证断言可重复。
+只用于 pytest：确保固定 ID 的基线行存在且状态确定，保证断言可重复。
+不会清空任何业务表，也不会删除测试/真实数据；用例产生的数据保留在库中。
 这些行不属于产品代码、不写入 seed、不参与任何运行时链路。
 """
 
@@ -12,25 +13,6 @@ from app.core.security import encrypt_secret, hash_secret, now_iso, suffix_of
 from app.db import models as m
 from app.db.seed import to_row
 from app.db.seed_data import make_seed
-
-RESET_TABLES = (
-    m.AgentMount,
-    m.McpTool,
-    m.McpCallRecord,
-    m.McpServer,
-    m.SkillVersion,
-    m.Skill,
-    m.ModelPublication,
-    m.ModelResource,
-    m.Agent,
-    m.Run,
-    m.ChatMessage,
-    m.LogEntry,
-    m.ExportTask,
-    m.Notification,
-    m.TrendDaily,
-    m.Session,
-)
 
 AGENTS = [
     ("agt-research", "深度研究助手", 1284, True, True, ["researchDepth", "outputLanguage"],
@@ -62,6 +44,12 @@ MCPS = [
     ("mcp-pg", "PostgreSQL Analytics", "sse"),
 ]
 
+AGENT_IDS = tuple(item[0] for item in AGENTS)
+MODEL_IDS = tuple(item[0] for item in MODELS)
+PUBLICATION_IDS = tuple(item[0] for item in PUBLICATIONS)
+MCP_IDS = tuple(item[0] for item in MCPS)
+LOG_IDS = tuple(f"log-{1000 + index}" for index in range(1, 13))
+
 
 def log_rows(stamp: str) -> list[dict]:
     common = {
@@ -91,9 +79,14 @@ def log_rows(stamp: str) -> list[dict]:
 
 
 async def reset_baseline(session: AsyncSession) -> None:
-    for model in RESET_TABLES:
-        await session.execute(delete(model))
-    await session.execute(delete(m.Credential).where(m.Credential.type != "management_access_key"))
+    """只重建基线自身占用的固定行，其它资源、日志与测试数据原样保留。"""
+    await session.execute(delete(m.AgentMount).where(m.AgentMount.agent_id.in_(AGENT_IDS)))
+    await session.execute(delete(m.Agent).where(m.Agent.id.in_(AGENT_IDS)))
+    await session.execute(delete(m.McpTool).where(m.McpTool.server_id.in_(MCP_IDS)))
+    await session.execute(delete(m.McpServer).where(m.McpServer.id.in_(MCP_IDS)))
+    await session.execute(delete(m.ModelPublication).where(m.ModelPublication.id.in_(PUBLICATION_IDS)))
+    await session.execute(delete(m.ModelResource).where(m.ModelResource.id.in_(MODEL_IDS)))
+    await session.execute(delete(m.LogEntry).where(m.LogEntry.log_id.in_(LOG_IDS)))
     await session.flush()
 
     stamp = now_iso()
@@ -170,18 +163,14 @@ async def reset_baseline(session: AsyncSession) -> None:
             "credential_suffix": row["credentialSuffix"],
         }))
 
-    await session.execute(delete(m.BuiltinTool))
-    await session.flush()
     for tool in make_seed()["tools"]:
-        session.add(m.BuiltinTool(**to_row(tool, m.BuiltinTool)))
+        if await session.get(m.BuiltinTool, tool["id"]) is None:
+            session.add(m.BuiltinTool(**to_row(tool, m.BuiltinTool)))
     await session.commit()
 
 
 async def cleanup(session: AsyncSession) -> None:
-    """用例结束后恢复干净初始态，避免测试数据留在开发库。"""
-    for model in RESET_TABLES:
-        await session.execute(delete(model))
-    await session.execute(delete(m.Credential).where(m.Credential.type != "management_access_key"))
+    """用例结束后只恢复工作区设置与访问 Key，保留所有测试数据，不清空任何表。"""
 
     stamp = now_iso()
     seed_settings = make_seed()["settings"]
@@ -203,8 +192,6 @@ async def cleanup(session: AsyncSession) -> None:
         key_row.suffix = suffix_of(demo_key)
 
     for tool in make_seed()["tools"]:
-        row = await session.get(m.BuiltinTool, tool["id"])
-        if row is not None:
-            row.call_count = 0
-            row.enabled = True
+        if await session.get(m.BuiltinTool, tool["id"]) is None:
+            session.add(m.BuiltinTool(**to_row(tool, m.BuiltinTool)))
     await session.commit()

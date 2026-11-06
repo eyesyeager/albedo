@@ -93,8 +93,42 @@ async def test_test_run_persists_messages_and_logs(client: AsyncClient) -> None:
 
     cleared = await client.delete("/api/v1/agents/agt-research/test-session")
     assert cleared.status_code == 200
+    # 默认 thread 与调用方自定义 thread 都要被清理，否则会出现「消息已清空但仍记得」。
+    assert cleared.json()["clearedThreads"] >= 2
     empty = await client.get("/api/v1/workspace/bootstrap")
     assert empty.json()["chatSessions"].get("agt-research", []) == []
+
+
+@pytest.mark.asyncio
+async def test_failed_run_writes_audit_log(client: AsyncClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    await login(client)
+    from app.api.v1 import agents as agents_api
+    from app.core.errors import ApiException
+    from app.services.audit import make_log_entry
+
+    class FailingEngine:
+        async def run(self, request):
+            error = ApiException("agent_run_failed", "模拟上游崩溃", 500)
+            error.duration_ms = 15
+            error.logs = [make_log_entry(
+                "失败运行审计测试", "模拟上游崩溃",
+                log_type="session", status="failed", source="test_session",
+                runId=request.run_id, threadId=request.thread_id, agentId=request.agent_id,
+                errorCode="agent_run_failed", errorMessage="模拟上游崩溃",
+            )]
+            raise error
+
+    monkeypatch.setattr(agents_api, "get_runtime_engine", lambda: FailingEngine())
+    response = await client.post("/api/v1/agents/agt-code/test-runs", json={"content": "触发失败", "testModelId": "mdl-gpt"})
+    assert response.status_code == 500
+    assert response.json()["error"]["code"] == "agent_run_failed"
+
+    logs = await client.get("/api/v1/logs", params={"keyword": "失败运行审计测试", "range": "1y"})
+    assert logs.status_code == 200
+    items = logs.json()["items"]
+    assert items, "失败运行必须写入审计日志"
+    assert items[0]["status"] == "failed"
+    assert items[0]["errorCode"] == "agent_run_failed"
 
 
 @pytest.mark.asyncio

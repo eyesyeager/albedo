@@ -1,7 +1,9 @@
 """外部服务网关：唯一实现，始终发起真实请求。"""
 
+import asyncio
 import json
 import time
+from typing import Any
 from urllib.parse import urlparse
 
 import httpx
@@ -26,6 +28,50 @@ def is_json_object(value: str) -> bool:
         return isinstance(json.loads(value), dict)
     except (json.JSONDecodeError, TypeError):
         return False
+
+
+def tool_input_schema(tool: Any) -> dict:
+    """读取工具声明的入参 JSON Schema；langchain 工具可能返回完整 schema 或仅 properties。"""
+    try:
+        schema = getattr(tool, "args_schema", None)
+    except Exception:  # noqa: BLE001 - 个别工具实现可能在属性访问时抛错
+        schema = None
+    if isinstance(schema, dict) and schema:
+        if schema.get("properties") is not None:
+            return schema
+        if all(isinstance(value, dict) for value in schema.values()):
+            # 有些客户端只暴露 properties 映射，补成标准 JSON Schema。
+            return {"type": "object", "properties": schema}
+    if isinstance(schema, type) and hasattr(schema, "model_json_schema"):
+        try:
+            return schema.model_json_schema()
+        except Exception:  # noqa: BLE001
+            pass
+    try:
+        args = getattr(tool, "args", None)
+    except Exception:  # noqa: BLE001
+        return {}
+    if isinstance(args, dict) and args:
+        return {"type": "object", "properties": args}
+    return {}
+
+
+def stringify_tool_output(value: Any, limit: int = 4000) -> str:
+    """把 MCP 工具返回值压平成可展示文本，超长只截断展示、不修改真实数据。"""
+    if isinstance(value, str):
+        text = value
+    elif isinstance(value, (dict, list)):
+        try:
+            text = json.dumps(value, ensure_ascii=False, default=str)
+        except (TypeError, ValueError):
+            text = str(value)
+    elif hasattr(value, "content"):
+        return stringify_tool_output(getattr(value, "content"), limit)
+    else:
+        text = str(value)
+    if len(text) > limit:
+        text = f"{text[:limit]}…（已截断，原始长度 {len(text)} 字符）"
+    return text
 
 
 class ModelGateway:
@@ -128,6 +174,56 @@ class McpGateway:
                 "name": str(tool.name),
                 "key": str(tool.name),
                 "description": str(tool.description or "")[:300],
+                "inputSchema": tool_input_schema(tool),
             }
             for tool in tools
         ]
+
+    async def call_tool(
+        self,
+        server: dict,
+        tool_key: str,
+        arguments: dict[str, Any],
+        timeout: float = 30.0,
+    ) -> dict[str, Any]:
+        """真实调用单个 MCP 工具；上游失败以 status=failed 返回，由调用方落库。"""
+        tools = await load_server_tools(server, timeout=timeout)
+        if not tools:
+            raise ApiException(
+                "upstream_unavailable",
+                "MCP 服务不可用：未能发现工具，请先完成连接测试",
+                502,
+            )
+        tool = next((item for item in tools if str(item.name) == tool_key), None)
+        if tool is None:
+            tool = next((item for item in tools if str(item.name).endswith(tool_key)), None)
+        if tool is None:
+            raise ApiException(
+                "resource_not_found",
+                f"MCP 服务未提供工具「{tool_key}」，请重新测试连接刷新工具清单",
+                404,
+            )
+
+        started = time.perf_counter()
+        try:
+            value = await asyncio.wait_for(tool.ainvoke(arguments), timeout=timeout)
+        except asyncio.TimeoutError:
+            return {
+                "status": "failed",
+                "durationMs": int((time.perf_counter() - started) * 1000),
+                "output": "",
+                "error": f"调用超时：超过 {int(timeout)} 秒未返回",
+            }
+        except Exception as exc:  # noqa: BLE001 - 上游异常需要原样反馈给测试面板
+            return {
+                "status": "failed",
+                "durationMs": int((time.perf_counter() - started) * 1000),
+                "output": "",
+                "error": f"{type(exc).__name__}: {str(exc)[:300]}",
+            }
+        return {
+            "status": "success",
+            "durationMs": int((time.perf_counter() - started) * 1000),
+            "output": stringify_tool_output(value),
+            "error": None,
+        }

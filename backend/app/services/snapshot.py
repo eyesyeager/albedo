@@ -1,3 +1,4 @@
+import json
 from collections import defaultdict
 from typing import Any
 
@@ -14,6 +15,17 @@ MOUNT_KEYS = {"mcp": "mcpIds", "skill": "skillIds", "tool": "toolIds", "model": 
 def snake_to_camel(name: str) -> str:
     head, *rest = name.split("_")
     return head + "".join(part[:1].upper() + part[1:] for part in rest)
+
+
+def tool_schema_dict(value: str | None) -> dict[str, Any]:
+    """把库里的 JSON Schema 文本还原为对象，历史脏数据按空对象处理。"""
+    if not (value or "").strip():
+        return {}
+    try:
+        parsed = json.loads(value)
+    except (json.JSONDecodeError, TypeError):
+        return {}
+    return parsed if isinstance(parsed, dict) else {}
 
 
 def row_dict(
@@ -62,11 +74,21 @@ async def build_workspace(session: AsyncSession) -> dict[str, Any]:
 
     tools_by_server: dict[str, list[dict[str, Any]]] = defaultdict(list)
     for tool in mcp_tool_rows:
-        tools_by_server[tool.server_id].append(row_dict(tool, drop={"server_id"}))
+        tools_by_server[tool.server_id].append(row_dict(
+            tool,
+            drop={"server_id", "input_schema"},
+            extra={"inputSchema": tool_schema_dict(tool.input_schema)},
+        ))
 
     versions_by_skill: dict[str, list[dict[str, Any]]] = defaultdict(list)
     for version in skill_version_rows:
         versions_by_skill[version.skill_id].append(row_dict(version, drop={"id", "skill_id", "file_path", "manifest"}))
+
+    # 被引用 Agent 数按挂载关系实时计算，避免库里 referenced_by 计数与实际挂载不一致。
+    skill_refs: dict[str, int] = defaultdict(int)
+    for mount in mount_rows:
+        if mount.kind == "skill":
+            skill_refs[mount.resource_id] += 1
 
     chat_sessions: dict[str, list[dict[str, Any]]] = defaultdict(list)
     for message in chat_rows:
@@ -96,7 +118,16 @@ async def build_workspace(session: AsyncSession) -> dict[str, Any]:
             row_dict(row, rename={"headers_enc": "headers"}, extra={"tools": tools_by_server[row.id]})
             for row in mcp_rows
         ],
-        "skills": [row_dict(row, extra={"versions": versions_by_skill[row.id]}) for row in skill_rows],
+        "skills": [
+            row_dict(
+                row,
+                extra={
+                    "versions": versions_by_skill[row.id],
+                    "referencedBy": skill_refs.get(row.id, 0),
+                },
+            )
+            for row in skill_rows
+        ],
         "tools": [row_dict(row) for row in tool_rows],
         "logs": [row_dict(row) for row in log_rows],
         "notifications": [row_dict(row) for row in notification_rows],

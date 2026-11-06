@@ -7,6 +7,7 @@ from sqlalchemy import delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import current_session
+from app.api.public.runtime import persist_failure
 from app.core.errors import ApiException
 from app.core.security import new_id, now_iso, suffix_of
 from app.db import models as m
@@ -275,7 +276,7 @@ async def test_run(
     if not advanced.get("keepContext", True):
         thread_id = f"thd_{run_id}"
 
-    result = await get_runtime_engine().run(RuntimeRequest(
+    request = RuntimeRequest(
         agent_id=agent_id,
         thread_id=thread_id,
         run_id=run_id,
@@ -284,7 +285,13 @@ async def test_run(
         variables=payload.variables,
         source="test_session",
         strict_variables=False,
-    ))
+    )
+    try:
+        result = await get_runtime_engine().run(request)
+    except ApiException as exc:
+        # 运行失败也要落审计日志，避免测试会话只看到 500、日志里查不到记录。
+        await persist_failure(db, agent, request, exc, snapshot)
+        raise
 
     for message in result.messages:
         db.add(m.ChatMessage(**{
@@ -334,7 +341,21 @@ async def clear_test_session(
     _: m.Session = Depends(current_session),
 ) -> dict:
     await get_or_404(db, m.Agent, agent_id)
+    # 同一智能体的测试会话可能使用默认 thread，也可能由调用方传入自定义 threadId；
+    # 只清理默认 thread 会让自定义会话的 checkpoint 残留，导致「已清空但仍记得」。
+    session_threads = set(
+        (await db.scalars(
+            select(m.Run.thread_id).where(m.Run.agent_id == agent_id, m.Run.source == "test_session")
+        )).all()
+    )
+    session_threads.add(f"thd_{agent_id}")
+    # 调试面板按智能体聚合展示消息，因此仍清空该智能体的全部 ChatMessage；
+    # checkpoint 只清测试会话相关的 thread，不破坏已发布调用方传入的上下文。
     await db.execute(delete(m.ChatMessage).where(m.ChatMessage.agent_id == agent_id))
-    await get_runtime_engine().clear_thread(f"thd_{agent_id}")
+    engine = get_runtime_engine()
+    cleared = 0
+    for thread_id in sorted(session_threads):
+        await engine.clear_thread(thread_id)
+        cleared += 1
     await db.commit()
-    return {"ok": True}
+    return {"ok": True, "clearedThreads": cleared}

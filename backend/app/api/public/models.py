@@ -1,6 +1,7 @@
 import json
 import logging
 import time
+from typing import Any
 
 import httpx
 from fastapi import APIRouter, Depends, Request
@@ -30,8 +31,22 @@ async def load_upstream_credential(db: AsyncSession, model: m.ModelResource) -> 
         )
     )
     if credential is None:
-        raise ApiException("model_version_disabled", "模型未配置上游凭证，无法转发", 409)
+        # 属上游侧配置缺失，无法完成转发：按网关错误返回 502，而非「版本停用」409。
+        raise ApiException("upstream_not_configured", "上游模型未配置凭证，无法转发", 502)
     return credential
+
+
+async def assert_model_identifier(db: AsyncSession, requested: Any, publication: m.ModelPublication) -> None:
+    """区分「标识不存在」（404）与「Key 无权使用」（403），避免语义混淆。"""
+    identifier = str(requested or "").strip()
+    if identifier == publication.call_identifier:
+        return
+    exists = await db.scalar(
+        select(m.ModelPublication.id).where(m.ModelPublication.call_identifier == identifier)
+    )
+    if exists is None:
+        raise ApiException("model_not_found", f"未找到模型标识「{identifier}」，请确认与 Key 绑定的发布版本一致", 404)
+    raise ApiException("model_not_allowed", "当前 Key 无权调用请求中的模型标识", 403)
 
 
 def upstream_headers(model: m.ModelResource, credential: m.Credential) -> dict[str, str]:
@@ -172,8 +187,7 @@ async def list_models(request: Request, db: AsyncSession = Depends(get_db)) -> d
 async def chat_completions(request: Request, db: AsyncSession = Depends(get_db)):
     body = await request.json()
     publication, model, credential = await require_publication(request, db)
-    if str(body.get("model") or "") != publication.call_identifier:
-        raise ApiException("model_not_allowed", "当前 Key 无权调用请求中的模型标识", 403)
+    await assert_model_identifier(db, body.get("model"), publication)
     await require_enabled(publication, model)
 
     payload = merge_body(body, publication, model)
@@ -214,8 +228,7 @@ async def chat_completions(request: Request, db: AsyncSession = Depends(get_db))
 async def embeddings(request: Request, db: AsyncSession = Depends(get_db)):
     body = await request.json()
     publication, model, credential = await require_publication(request, db)
-    if str(body.get("model") or "") != publication.call_identifier:
-        raise ApiException("model_not_allowed", "当前 Key 无权调用请求中的模型标识", 403)
+    await assert_model_identifier(db, body.get("model"), publication)
     if model.type != "embedding":
         raise ApiException("invalid_request", "该发布版本不是 Embedding 模型", 400)
     await require_enabled(publication, model)

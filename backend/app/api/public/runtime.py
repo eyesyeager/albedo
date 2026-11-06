@@ -96,6 +96,55 @@ async def persist_result(
     await db.commit()
 
 
+async def persist_failure_logs(
+    db: AsyncSession,
+    agent: m.Agent,
+    request: RuntimeRequest,
+    logs: list[dict],
+    duration_ms: int,
+    snapshot: dict,
+) -> None:
+    """把失败的运行写入审计日志与 Run 记录，保证 500 也能被追溯。"""
+    if not logs:
+        return
+    for log in logs:
+        db.add(m.LogEntry(**to_row(log, m.LogEntry)))
+    db.add(m.Run(
+        run_id=request.run_id,
+        thread_id=request.thread_id,
+        agent_id=agent.id,
+        source=request.source,
+        status="failed",
+        config_snapshot=snapshot,
+        finish_reason="failed",
+        usage={},
+        duration_ms=duration_ms,
+        created_at=now_iso(),
+        updated_at=now_iso(),
+    ))
+    agent.session_count += 1
+    try:
+        await db.commit()
+    except Exception:  # noqa: BLE001
+        # 审计写入失败不应覆盖原始运行错误，回滚后把真实错误继续抛给调用方。
+        await db.rollback()
+
+
+async def persist_failure(
+    db: AsyncSession,
+    agent: m.Agent,
+    request: RuntimeRequest,
+    error: ApiException,
+    snapshot: dict,
+) -> None:
+    await persist_failure_logs(
+        db, agent, request,
+        list(getattr(error, "logs", None) or []),
+        int(getattr(error, "duration_ms", 0) or 0),
+        snapshot,
+    )
+
+
 async def execute_agent_run(
     db: AsyncSession,
     agent: m.Agent,
@@ -118,6 +167,7 @@ async def execute_agent_run(
     try:
         result = await get_runtime_engine().run(request)
     except ApiException as exc:
+        await persist_failure(db, agent, request, exc, snapshot)
         code, status = ERROR_MAP.get(exc.code, ("agent_run_failed", 500))
         raise ApiException(code, exc.message, status) from exc
     await persist_result(db, agent, result, snapshot, source)

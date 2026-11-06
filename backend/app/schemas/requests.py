@@ -106,6 +106,11 @@ class McpDraft(McpTestRequest):
     pass
 
 
+class McpToolTestRequest(PatchModel):
+    arguments: dict[str, Any] = Field(default_factory=dict)
+    timeoutSeconds: int = 30
+
+
 class McpPatch(PatchModel):
     name: str | None = None
     description: str | None = None

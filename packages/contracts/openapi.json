@@ -567,6 +567,48 @@
         }
       }
     },
+    "/api/v1/mcps/{mcp_id}/test": {
+      "post": {
+        "tags": [
+          "mcps"
+        ],
+        "summary": "测试已接入 MCP 的连接",
+        "operationId": "test_existing_mcp_api_v1_mcps__mcp_id__test_post",
+        "parameters": [
+          {
+            "name": "mcp_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Mcp Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WriteResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/mcps/{mcp_id}": {
       "get": {
         "tags": [
@@ -799,6 +841,120 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/WriteResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/mcps/{mcp_id}/tools/{tool_id}/test": {
+      "post": {
+        "tags": [
+          "mcps"
+        ],
+        "summary": "MCP 工具调用测试",
+        "operationId": "test_mcp_tool_api_v1_mcps__mcp_id__tools__tool_id__test_post",
+        "parameters": [
+          {
+            "name": "mcp_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Mcp Id"
+            }
+          },
+          {
+            "name": "tool_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Tool Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/McpToolTestRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/McpToolTestResult"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/mcps/{mcp_id}/tools/{tool_id}/schema": {
+      "post": {
+        "tags": [
+          "mcps"
+        ],
+        "summary": "重新读取 MCP 工具入参定义",
+        "operationId": "refresh_mcp_tool_schema_api_v1_mcps__mcp_id__tools__tool_id__schema_post",
+        "parameters": [
+          {
+            "name": "mcp_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Mcp Id"
+            }
+          },
+          {
+            "name": "tool_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Tool Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Refresh Mcp Tool Schema Api V1 Mcps  Mcp Id  Tools  Tool Id  Schema Post"
                 }
               }
             }
@@ -1963,6 +2119,16 @@
               "type": "string",
               "default": "all",
               "title": "Agentid"
+            }
+          },
+          {
+            "name": "runId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "Runid"
             }
           }
         ],
@@ -4319,6 +4485,11 @@
             "type": "string",
             "title": "Description"
           },
+          "inputSchema": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Inputschema"
+          },
           "enabled": {
             "type": "boolean",
             "title": "Enabled"
@@ -4333,6 +4504,80 @@
           "enabled"
         ],
         "title": "McpTool"
+      },
+      "McpToolTestRequest": {
+        "properties": {
+          "arguments": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Arguments"
+          },
+          "timeoutSeconds": {
+            "type": "integer",
+            "title": "Timeoutseconds",
+            "default": 30
+          }
+        },
+        "type": "object",
+        "title": "McpToolTestRequest"
+      },
+      "McpToolTestResult": {
+        "properties": {
+          "toolKey": {
+            "type": "string",
+            "title": "Toolkey"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "success",
+              "failed"
+            ],
+            "title": "Status"
+          },
+          "durationMs": {
+            "type": "integer",
+            "title": "Durationms"
+          },
+          "output": {
+            "type": "string",
+            "title": "Output",
+            "default": ""
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "timestamp": {
+            "type": "string",
+            "title": "Timestamp"
+          },
+          "log": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/LogEntry"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "toolKey",
+          "status",
+          "durationMs",
+          "timestamp"
+        ],
+        "title": "McpToolTestResult"
       },
       "ModelDraft": {
         "properties": {
@@ -5550,6 +5795,11 @@
             },
             "type": "array",
             "title": "Tools"
+          },
+          "latencyMs": {
+            "type": "integer",
+            "title": "Latencyms",
+            "default": 0
           }
         },
         "type": "object",
@@ -5984,6 +6234,17 @@
               }
             ],
             "title": "Latencyms"
+          },
+          "toolCount": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Toolcount"
           }
         },
         "type": "object",

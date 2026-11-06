@@ -168,13 +168,31 @@ async def test_publication_key_models_and_errors(client: AsyncClient) -> None:
     invalid = await client.get("/v1/models", headers=auth("alb_sk_invalid_key_0000"))
     assert invalid.status_code == 401
 
-    not_allowed = await client.post(
+    # 标识不存在 → 404；存在但 Key 无权 → 403，两者语义必须区分。
+    not_found = await client.post(
         "/v1/chat/completions",
         headers=auth(token),
         json={"model": "another-model", "messages": [{"role": "user", "content": "hi"}]},
     )
+    assert not_found.status_code == 404
+    assert not_found.json()["error"]["code"] == "model_not_found"
+
+    not_allowed = await client.post(
+        "/v1/chat/completions",
+        headers=auth(token),
+        json={"model": "albedo-gpt-4.1-creative", "messages": [{"role": "user", "content": "hi"}]},
+    )
     assert not_allowed.status_code == 403
     assert not_allowed.json()["error"]["code"] == "model_not_allowed"
+
+    # 上游凭证缺失属于网关侧不可用，返回 502 而不是「版本停用」409。
+    no_credential = await client.post(
+        "/v1/chat/completions",
+        headers=auth(token),
+        json={"model": "albedo-gpt-4.1", "messages": [{"role": "user", "content": "hi"}]},
+    )
+    assert no_credential.status_code == 502
+    assert no_credential.json()["error"]["code"] == "upstream_not_configured"
 
     wrong_type = await client.post(
         "/v1/embeddings",

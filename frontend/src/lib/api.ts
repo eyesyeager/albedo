@@ -2,12 +2,16 @@ import type {
   AccessKeyDraft,
   Agent,
   AgentDraft,
+  AgentHistory,
   BuiltinTool,
   ChatMessage,
   ExportTask,
   LogEntry,
+  McpDiscoveryResult,
   McpDraft,
   McpServer,
+  McpToolInputSchema,
+  McpToolTestResult,
   ModelDraft,
   ModelPublication,
   ModelResource,
@@ -37,6 +41,7 @@ interface WriteResponse<T> {
   notifications?: NotificationItem[]
   logs?: LogEntry[]
   latencyMs?: number
+  toolCount?: number
 }
 
 const state = () => useWorkspace.getState()
@@ -131,6 +136,10 @@ export const api = {
       if (response.entity) state().upsertAgent(response.entity)
       syncLog(response.log)
     },
+    // 服务端分页外的会话历史，避免只依赖 bootstrap 的 50 条日志快照。
+    async history(id: string): Promise<AgentHistory> {
+      return await http<AgentHistory>(`/agents/${encodeURIComponent(id)}/history`)
+    },
   },
 
   models: {
@@ -193,8 +202,39 @@ export const api = {
   },
 
   mcp: {
-    async test(draft: McpDraft): Promise<{ toolCount: number }> {
-      return await post<{ toolCount: number }>('/mcps/test', draft)
+    async test(draft: McpDraft): Promise<McpDiscoveryResult> {
+      // 后端工具发现最长 30 秒，默认 15 秒的请求超时会被提前中断。
+      return await post<McpDiscoveryResult>('/mcps/test', draft, { timeoutMs: 40000 })
+    },
+    async testExisting(id: string): Promise<{ toolCount: number; latencyMs: number }> {
+      const response = await post<WriteResponse<McpServer>>(`/mcps/${id}/test`, undefined, { timeoutMs: 40000 })
+      if (response.entity) state().upsertMcp(response.entity)
+      syncLog(response.log)
+      return { toolCount: response.toolCount ?? 0, latencyMs: response.latencyMs ?? 0 }
+    },
+    async testTool(mcpId: string, toolId: string, args: Record<string, unknown>, timeoutSeconds: number): Promise<McpToolTestResult> {
+      const result = await post<McpToolTestResult>(
+        `/mcps/${mcpId}/tools/${toolId}/test`,
+        { arguments: args, timeoutSeconds },
+        { timeoutMs: Math.max(20000, timeoutSeconds * 1000 + 5000) },
+      )
+      syncLog(result.log ?? undefined)
+      const current = state().mcps.find((item) => item.id === mcpId)
+      if (current) {
+        const total = current.callCount + 1
+        const succeeded = (current.successRate / 100) * current.callCount + (result.status === 'success' ? 1 : 0)
+        state().patchMcp(mcpId, { callCount: total, successRate: Math.round((succeeded / total) * 10000) / 100 })
+      }
+      return result
+    },
+    async toolSchema(mcpId: string, toolId: string): Promise<McpToolInputSchema> {
+      const result = await post<{ toolKey: string; inputSchema: McpToolInputSchema }>(
+        `/mcps/${mcpId}/tools/${toolId}/schema`,
+        undefined,
+        { timeoutMs: 40000 },
+      )
+      state().patchMcpToolSchema(mcpId, toolId, result.inputSchema)
+      return result.inputSchema
     },
     async create(draft: McpDraft): Promise<void> {
       const response = await post<WriteResponse<McpServer>>('/mcps', draft)

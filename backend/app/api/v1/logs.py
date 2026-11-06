@@ -84,12 +84,23 @@ def verify_download_signature(task_id: str, expires: str | None, signature: str 
     return hmac.compare_digest(expected, signature)
 
 
-async def log_conditions(db: AsyncSession, *, keyword: str, status: str, range: str, agentId: str) -> list[Any]:
+async def log_conditions(
+    db: AsyncSession,
+    *,
+    keyword: str,
+    status: str,
+    range: str,
+    agentId: str,
+    runId: str = "",
+) -> list[Any]:
     conditions: list[Any] = [m.LogEntry.timestamp >= range_cutoff(range)]
     if status != "all":
         conditions.append(m.LogEntry.status == status)
     if agentId != "all":
         conditions.append(m.LogEntry.agent_id == agentId)
+    # runId 精确匹配用于「对话历史」「执行链路」深链，不依赖前端快照。
+    if runId.strip():
+        conditions.append(m.LogEntry.run_id == runId.strip())
     if keyword.strip():
         like = f"%{keyword.strip()}%"
         agent_ids = [
@@ -129,10 +140,13 @@ async def query_logs(
     status: str = "all",
     range: str = "7d",
     agentId: str = "all",
+    runId: str = "",
     db: AsyncSession = Depends(get_db),
     _: m.Session = Depends(current_session),
 ) -> dict:
-    conditions = await log_conditions(db, keyword=keyword, status=status, range=range, agentId=agentId)
+    conditions = await log_conditions(
+        db, keyword=keyword, status=status, range=range, agentId=agentId, runId=runId
+    )
 
     grouped = (
         await db.execute(select(m.LogEntry.type, func.count()).where(*conditions).group_by(m.LogEntry.type))

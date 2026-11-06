@@ -88,16 +88,70 @@ async def test_mcp_crud_and_tool_toggle(client: AsyncClient) -> None:
     assert created.status_code == 201, created.text
     entity = created.json()["entity"]
     assert len(entity["tools"]) == 3
-    tool_id = entity["tools"][0]["id"]
+    search_tool = next(item for item in entity["tools"] if item["key"] == "search")
+    assert search_tool["inputSchema"]["properties"]["query"]["description"] == "检索关键词"
+    tool_id = search_tool["id"]
+
+    schema = await client.post(f"/api/v1/mcps/{entity['id']}/tools/{tool_id}/schema")
+    assert schema.status_code == 200, schema.text
+    assert schema.json()["inputSchema"]["required"] == ["query"]
 
     toggled = await client.patch(f"/api/v1/mcps/{entity['id']}/tools/{tool_id}", json={"enabled": False})
-    assert toggled.json()["entity"]["tools"][0]["enabled"] is False
+    toggled_tools = {item["key"]: item for item in toggled.json()["entity"]["tools"]}
+    assert toggled_tools["search"]["enabled"] is False
 
     usage = await client.patch(f"/api/v1/mcps/{entity['id']}/usage", json={"qpm": 120, "maxConcurrency": 8})
     assert usage.json()["entity"]["qpm"] == 120
 
+    retested = await client.post(f"/api/v1/mcps/{entity['id']}/test")
+    assert retested.status_code == 200, retested.text
+    assert retested.json()["toolCount"] == 3
+    assert retested.json()["entity"]["connection"] == "normal"
+    assert retested.json()["entity"]["lastTestedAt"]
+
+    invoked = await client.post(
+        f"/api/v1/mcps/{entity['id']}/tools/{tool_id}/test",
+        json={"arguments": {"query": "hello"}, "timeoutSeconds": 15},
+    )
+    assert invoked.status_code == 200, invoked.text
+    assert invoked.json()["status"] == "success"
+    assert invoked.json()["toolKey"] == "search"
+    assert "hello" in invoked.json()["output"]
+
     calls = await client.get(f"/api/v1/mcps/{entity['id']}/calls")
-    assert calls.json()["total"] == 0
+    assert calls.json()["total"] == 1
+    assert calls.json()["items"][0]["toolKey"] == "search"
+
+    stats = (await client.get("/api/v1/mcps")).json()
+    current = next(item for item in stats if item["id"] == entity["id"])
+    assert current["callCount"] == 1
+    assert current["successRate"] == 100.0
+
+
+@pytest.mark.asyncio
+async def test_mcp_tool_test_records_failure(client: AsyncClient, monkeypatch) -> None:
+    from app.adapters import gateway
+
+    await login(client)
+    draft = {
+        "name": "失败路径 MCP", "description": "集成测试", "transport": "streamable_http",
+        "endpoint": "https://mcp.example.com/mcp", "headers": "{}", "timeoutSeconds": 60, "tested": True,
+    }
+    entity = (await client.post("/api/v1/mcps", json=draft)).json()["entity"]
+    tool_id = entity["tools"][0]["id"]
+
+    async def failed_call(self, server, tool_key, arguments, timeout=30.0):
+        return {"status": "failed", "durationMs": 5, "output": "", "error": "ToolError: boom"}
+
+    monkeypatch.setattr(gateway.McpGateway, "call_tool", failed_call)
+    response = await client.post(f"/api/v1/mcps/{entity['id']}/tools/{tool_id}/test", json={"arguments": {}})
+    assert response.status_code == 200
+    assert response.json()["status"] == "failed"
+    assert "boom" in response.json()["error"]
+
+    current = next(item for item in (await client.get("/api/v1/mcps")).json() if item["id"] == entity["id"])
+    assert current["callCount"] == 1
+    assert current["successRate"] == 0.0
 
 
 @pytest.mark.asyncio
@@ -120,6 +174,42 @@ async def test_skill_upload_and_version(client: AsyncClient) -> None:
 
     detail = await client.get(f"/api/v1/skills/{entity['id']}")
     assert detail.json()["version"] == "v1.1.0"
+    assert detail.json()["referencedBy"] == 0
+
+    # 被引用 Agent 数必须跟随挂载关系实时变化，而不是固定为 0。
+    mounted = await client.patch("/api/v1/agents/agt-data", json={
+        "mounts": {"mcpIds": [], "skillIds": [entity["id"]], "toolIds": [], "modelIds": ["mdl-gpt"]},
+    })
+    assert mounted.status_code == 200, mounted.text
+    counted = await client.get(f"/api/v1/skills/{entity['id']}")
+    assert counted.json()["referencedBy"] == 1
+    bootstrap = await client.get("/api/v1/workspace/bootstrap")
+    assert next(item for item in bootstrap.json()["skills"] if item["id"] == entity["id"])["referencedBy"] == 1
+
+
+def test_tool_input_schema_normalization() -> None:
+    from app.adapters.gateway import tool_input_schema
+
+    class FullSchema:
+        args_schema = {"type": "object", "properties": {"query": {"type": "string"}}, "required": ["query"]}
+
+    class PropertiesOnly:
+        args_schema = {"query": {"type": "string", "description": "关键词"}}
+
+    class ArgsOnly:
+        args = {"limit": {"type": "integer"}}
+
+    class Broken:
+        @property
+        def args_schema(self):
+            raise RuntimeError("boom")
+
+    assert tool_input_schema(FullSchema())["required"] == ["query"]
+    assert tool_input_schema(PropertiesOnly())["properties"]["query"]["type"] == "string"
+    assert tool_input_schema(ArgsOnly())["type"] == "object"
+    assert tool_input_schema(ArgsOnly())["properties"]["limit"]["type"] == "integer"
+    assert tool_input_schema(Broken()) == {}
+    assert tool_input_schema(object()) == {}
 
 
 @pytest.mark.asyncio

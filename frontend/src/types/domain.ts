@@ -6,11 +6,30 @@ export type LogType = 'session' | 'mcp' | 'skill' | 'tool' | 'model' | 'system'
 export type LogStatus = 'running' | 'success' | 'failed' | 'timeout'
 export type LogSource = 'test_session' | 'standard_api' | 'agui' | 'model_api' | 'system'
 
+export interface McpToolSchemaProperty {
+  type?: string
+  description?: string
+  default?: unknown
+  enum?: unknown[]
+  items?: McpToolSchemaProperty
+  anyOf?: McpToolSchemaProperty[]
+  oneOf?: McpToolSchemaProperty[]
+  properties?: Record<string, McpToolSchemaProperty>
+  required?: string[]
+}
+
+export interface McpToolInputSchema {
+  type?: string
+  properties?: Record<string, McpToolSchemaProperty>
+  required?: string[]
+}
+
 export interface McpTool {
   id: string
   name: string
   key: string
   description: string
+  inputSchema?: McpToolInputSchema
   enabled: boolean
 }
 
@@ -160,6 +179,12 @@ export interface LogEntry {
   errorCode?: string
   errorMessage?: string
   credentialSuffix?: string
+}
+
+export interface AgentHistory {
+  items: LogEntry[]
+  total: number
+  sources: LogSource[]
 }
 
 export interface NotificationItem {
@@ -361,6 +386,28 @@ export interface McpDraft {
   headers: string
   timeoutSeconds: number
   tested: boolean
+}
+
+export interface DiscoveredMcpTool {
+  name: string
+  key: string
+  description: string
+}
+
+export interface McpDiscoveryResult {
+  toolCount: number
+  tools: DiscoveredMcpTool[]
+  latencyMs: number
+}
+
+export interface McpToolTestResult {
+  toolKey: string
+  status: 'success' | 'failed'
+  durationMs: number
+  output: string
+  error?: string | null
+  timestamp: string
+  log?: LogEntry | null
 }
 
 export interface SkillDraft {
