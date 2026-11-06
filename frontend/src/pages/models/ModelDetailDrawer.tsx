@@ -1,12 +1,12 @@
 import { useEffect, useState } from 'react'
-import { Plus, Server, Wand2 } from 'lucide-react'
+import { Plus, Server, Trash2, Wand2 } from 'lucide-react'
 import { formatDateTime } from '../../lib/format'
 import { maskedUpstreamKey, newSecretKey } from '../../lib/mask'
 import { api } from '../../lib/api'
 import { asError } from '../../lib/errors'
 import { publicationsOf } from '../../store/selectors'
 import { useWorkspace } from '../../store/workspace'
-import { Badge, Button, CopyButton, Drawer, Field, Input, Modal, Switch, Textarea, toast } from '../../components/ui'
+import { Badge, Button, ConfirmDialog, CopyButton, Drawer, Field, Input, Modal, Switch, Textarea, toast } from '../../components/ui'
 import { ConnectionBadge } from '../../components/common/StatusBadge'
 
 export function ModelDetailDrawer({ modelId, onClose, onPublish }: { modelId: string | null; onClose: () => void; onPublish: () => void }) {
@@ -19,6 +19,8 @@ export function ModelDetailDrawer({ modelId, onClose, onPublish }: { modelId: st
   const [rotateKey, setRotateKey] = useState('')
   const [rotatedKey, setRotatedKey] = useState<string | null>(null)
   const [rotateBusy, setRotateBusy] = useState(false)
+  const [deleteVersionId, setDeleteVersionId] = useState<string | null>(null)
+  const [deletingVersion, setDeletingVersion] = useState(false)
 
   useEffect(() => {
     const current = useWorkspace.getState().models.find((item) => item.id === modelId)
@@ -48,6 +50,21 @@ export function ModelDetailDrawer({ modelId, onClose, onPublish }: { modelId: st
       })
       .catch((reason: unknown) => toast.error(asError(reason).message))
       .finally(() => setRotateBusy(false))
+  }
+
+  const deleteVersion = deleteVersionId ? versions.find((item) => item.id === deleteVersionId) : undefined
+
+  const confirmDeleteVersion = () => {
+    if (!deleteVersionId || deletingVersion) return
+    setDeletingVersion(true)
+    api.models
+      .removePublication(deleteVersionId)
+      .then(() => {
+        toast.success('发布版本已删除，该版本 Key 立即失效')
+        setDeleteVersionId(null)
+      })
+      .catch((reason: unknown) => toast.error(asError(reason).message))
+      .finally(() => setDeletingVersion(false))
   }
 
   const save = () => {
@@ -110,7 +127,7 @@ export function ModelDetailDrawer({ modelId, onClose, onPublish }: { modelId: st
           {versions.length === 0 ? (
             <div className="rounded-field border border-dashed border-line px-4 py-8 text-center">
               <p className="text-xs font-medium text-ink">尚未发布任何版本</p>
-              <p className="mt-1 text-2xs text-ink-faint">发布后可使用 OpenAI SDK 通过统一地址调用该模型</p>
+              <p className="mt-1 text-2xs text-ink-faint">发布后可通过 curl 使用统一地址调用该模型</p>
             </div>
           ) : (
             <div className="space-y-3">
@@ -134,7 +151,12 @@ export function ModelDetailDrawer({ modelId, onClose, onPublish }: { modelId: st
                     <div><p className="font-mono text-xs font-semibold text-ink">••{version.credentialSuffix}</p><p className="text-[10px] text-ink-faint">Key 后缀</p></div>
                   </div>
                   <p className="mt-2 text-2xs text-ink-faint">发布于 {formatDateTime(version.createdAt)} · 请求头 {version.headersConfigured ? '已配置' : '未配置'}</p>
-                  <button type="button" onClick={() => openRotate(version.id)} className="mt-2 text-2xs font-medium text-brand transition-colors hover:text-brand-hover">轮换密钥 →</button>
+                  <div className="mt-2 flex items-center gap-3">
+                    <button type="button" onClick={() => openRotate(version.id)} className="text-2xs font-medium text-brand transition-colors hover:text-brand-hover">轮换密钥 →</button>
+                    <button type="button" onClick={() => setDeleteVersionId(version.id)} className="inline-flex items-center gap-1 text-2xs font-medium text-ink-faint transition-colors hover:text-danger">
+                      <Trash2 className="h-3 w-3" />删除版本
+                    </button>
+                  </div>
                 </div>
               ))}
             </div>
@@ -168,6 +190,22 @@ export function ModelDetailDrawer({ modelId, onClose, onPublish }: { modelId: st
           </div>
         )}
       </Modal>
+
+      <ConfirmDialog
+        open={deleteVersionId !== null}
+        onClose={() => setDeleteVersionId(null)}
+        onConfirm={confirmDeleteVersion}
+        title={`删除发布版本 ${deleteVersion?.version ?? ''}？`}
+        description="删除后该版本的调用标识与自定义 Key 立即失效，下游请求将返回鉴权失败，且无法恢复。"
+        confirmText="确认删除"
+        danger
+        loading={deletingVersion}
+        impacts={[
+          `调用标识：${deleteVersion?.callIdentifier ?? ''} 将不可再使用`,
+          `该版本 Key（••${deleteVersion?.credentialSuffix ?? ''}）同步销毁`,
+          '同一模型的其他发布版本不受影响，模型资源本身保留',
+        ]}
+      />
     </Drawer>
   )
 }

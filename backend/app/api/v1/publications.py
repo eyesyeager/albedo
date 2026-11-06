@@ -2,7 +2,7 @@ import re
 from typing import Any
 
 from fastapi import APIRouter, Depends
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import current_session
@@ -130,6 +130,30 @@ async def update_publication(
     return await commit_write(
         db, entity, "启用模型版本" if patch.get("enabled") else "停用模型版本",
         f"发布版本 {publication_id} 配置已更新", resource_id=row.model_id,
+    )
+
+
+@router.delete("/publications/{publication_id}", response_model=WriteResponse, summary="删除发布版本")
+async def remove_publication(
+    publication_id: str,
+    db: AsyncSession = Depends(get_db),
+    _: m.Session = Depends(current_session),
+) -> dict:
+    row = await get_or_404(db, m.ModelPublication, publication_id)
+    model_id = row.model_id
+    version = row.version
+    identifier = row.call_identifier
+    await db.execute(
+        delete(m.Credential).where(
+            m.Credential.type == "model_publication_key",
+            m.Credential.resource_id == publication_id,
+        )
+    )
+    await db.delete(row)
+    return await commit_write(
+        db, None, "删除模型发布版本",
+        f"删除发布版本 {version}（调用标识 {identifier}），该版本 Key 立即失效",
+        resource_id=model_id,
     )
 
 

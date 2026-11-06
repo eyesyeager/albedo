@@ -185,6 +185,11 @@ export const api = {
       if (!response.fullKey) throw new Error('后端未返回完整凭证，请重试')
       return response.fullKey
     },
+    async removePublication(id: string): Promise<void> {
+      const response = await del<WriteResponse<never>>(`/publications/${id}`)
+      state().removePublication(id)
+      syncLog(response.log)
+    },
   },
 
   mcp: {

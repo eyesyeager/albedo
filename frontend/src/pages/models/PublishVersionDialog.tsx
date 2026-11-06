@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { CheckCircle2, Eye, EyeOff, KeyRound, ShieldCheck, Wand2 } from 'lucide-react'
-import type { ModelResource, PublicationDraft } from '../../types/domain'
+import type { ModelPublication, ModelResource, PublicationDraft } from '../../types/domain'
 import { maskedUpstreamKey, newSecretKey } from '../../lib/mask'
 import { firstIssue, validatePublication } from '../../lib/validate'
 import { api } from '../../lib/api'
@@ -28,18 +28,19 @@ export function PublishVersionDialog({ model, open, onClose }: { model: ModelRes
   const [draft, setDraft] = useState<PublicationDraft | null>(null)
   const [keyVisible, setKeyVisible] = useState(false)
   const [busy, setBusy] = useState(false)
-  const [fullKey, setFullKey] = useState<string | null>(null)
+  const [published, setPublished] = useState<{ publication: ModelPublication; fullKey: string } | null>(null)
   const [error, setError] = useState('')
 
   const versionCount = model ? publications.filter((item) => item.modelId === model.id).length : 0
 
   useEffect(() => {
     if (!open || !model) return
-    setDraft(draftFor(model, publications.filter((item) => item.modelId === model.id).length, config.defaults.publication))
-    setFullKey(null)
+    const count = useWorkspace.getState().publications.filter((item) => item.modelId === model.id).length
+    setDraft(draftFor(model, count, config.defaults.publication))
+    setPublished(null)
     setError('')
     setKeyVisible(false)
-  }, [open, model?.id, versionCount])
+  }, [open, model?.id])
 
   if (!model || !draft) return null
 
@@ -64,7 +65,7 @@ export function PublishVersionDialog({ model, open, onClose }: { model: ModelRes
     api.models
       .publish(model.id, draft)
       .then(({ publication, fullKey: key }) => {
-        setFullKey(key)
+        setPublished({ publication, fullKey: key })
         toast.success(`${model.name} ${publication.version} 发布成功`)
       })
       .catch((reason: unknown) => {
@@ -77,27 +78,41 @@ export function PublishVersionDialog({ model, open, onClose }: { model: ModelRes
 
   const baseUrl = `${domain.replace(/\/$/, '')}/v1`
 
-  if (fullKey) {
+  const curlSnippet = (callIdentifier: string, key: string): string => {
+    const endpoint = model.type === 'embedding' ? 'embeddings' : 'chat/completions'
+    const body = model.type === 'embedding'
+      ? `{
+    "model": "${callIdentifier}",
+    "input": "你好"
+  }`
+      : `{
+    "model": "${callIdentifier}",
+    "messages": [
+      {"role": "system", "content": "You are a helpful assistant."},
+      {"role": "user", "content": "你好"}
+    ],
+    "stream": false
+  }`
+    return `curl -X POST '${baseUrl}/${endpoint}' \\\n  -H 'Authorization: Bearer ${key}' \\\n  -H 'Content-Type: application/json' \\\n  -d '${body}'`
+  }
+
+  if (published) {
     return (
       <Modal
         open={open}
         onClose={onClose}
         title="发布成功 · 请保存密钥"
         description="该版本的自定义 API Key 仅展示这一次，关闭后无法再次查看"
-        width="md"
+        width="lg"
         footer={<Button onClick={onClose} icon={<CheckCircle2 className="h-3.5 w-3.5" />}>我已保存</Button>}
       >
         <div className="space-y-3">
-          <div className="rounded-field bg-ok/10 px-3 py-2.5 text-xs text-ok">版本 {draft.version} 已发布，调用标识 {draft.callIdentifier}</div>
-          <code className="block break-all rounded-field bg-canvas px-3 py-3 font-mono text-xs text-ink">{fullKey}</code>
-          <CopyButton value={fullKey} label="复制完整密钥" message="完整密钥已复制，请立即保存" />
-          <div className="rounded-field border border-line p-3">
-            <p className="text-2xs text-ink-faint">下游使用 OpenAI SDK 时的配置</p>
-            <CodeBlock
-              language="python"
-              maxHeight="150px"
-              code={`from openai import OpenAI\nclient = OpenAI(base_url="${baseUrl}", api_key=os.environ["ALBEDO_MODEL_KEY"])\nclient.chat.completions.create(model="${draft.callIdentifier}", messages=[{"role":"user","content":"你好"}])`}
-            />
+          <div className="rounded-field bg-ok/10 px-3 py-2.5 text-xs text-ok">版本 {published.publication.version} 已发布，调用标识 {published.publication.callIdentifier}</div>
+          <code className="block break-all rounded-field bg-canvas px-3 py-3 font-mono text-xs text-ink">{published.fullKey}</code>
+          <CopyButton value={published.fullKey} label="复制完整密钥" message="完整密钥已复制，请立即保存" />
+          <div className="space-y-2 rounded-field border border-line p-3">
+            <p className="text-2xs text-ink-faint">通过 curl 调用该版本（示例已填入本次密钥，删除该版本或轮换密钥后示例失效）</p>
+            <CodeBlock language="bash" maxHeight="260px" code={curlSnippet(published.publication.callIdentifier, published.fullKey)} />
           </div>
         </div>
       </Modal>

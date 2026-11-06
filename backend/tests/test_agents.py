@@ -126,3 +126,11 @@ async def test_publication_versions_and_key_rotation(client: AsyncClient) -> Non
 
     weak = await client.post(f"/api/v1/publications/{publication['id']}/key/rotate", json={"apiKey": "short"})
     assert weak.status_code == 400
+
+    removed = await client.delete(f"/api/v1/publications/{publication['id']}")
+    assert removed.status_code == 200
+    remaining = await client.get("/api/v1/models/mdl-gpt/publications")
+    assert all(item["id"] != publication["id"] for item in remaining.json())
+
+    missing = await client.delete(f"/api/v1/publications/{publication['id']}")
+    assert missing.status_code == 404

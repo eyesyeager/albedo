@@ -1786,6 +1786,46 @@
             }
           }
         }
+      },
+      "delete": {
+        "tags": [
+          "publications"
+        ],
+        "summary": "删除发布版本",
+        "operationId": "remove_publication_api_v1_publications__publication_id__delete",
+        "parameters": [
+          {
+            "name": "publication_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Publication Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WriteResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
       }
     },
     "/api/v1/publications/{publication_id}/key/rotate": {

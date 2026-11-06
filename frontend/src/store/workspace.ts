@@ -26,6 +26,7 @@ interface WorkspaceStore extends WorkspaceData {
   removeModel: (id: string) => void
   upsertPublication: (publication: ModelPublication) => void
   patchPublication: (id: string, patch: Partial<ModelPublication>) => void
+  removePublication: (id: string) => void
   upsertMcp: (mcp: McpServer) => void
   patchMcp: (id: string, patch: Partial<McpServer>) => void
   patchMcpTool: (mcpId: string, toolId: string, enabled: boolean) => void
@@ -92,6 +93,8 @@ export const useWorkspace = create<WorkspaceStore>()((set) => ({
     })),
   patchPublication: (id, patch) =>
     set((state) => ({ publications: updateById(state.publications, id, patch) })),
+  removePublication: (id) =>
+    set((state) => ({ publications: state.publications.filter((item) => item.id !== id) })),
   upsertMcp: (mcp) =>
     set((state) => ({
       mcps: state.mcps.some((item) => item.id === mcp.id)
