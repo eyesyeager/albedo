@@ -2,7 +2,7 @@ import json
 import time
 
 from fastapi import APIRouter, Depends
-from sqlalchemy import select
+from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.adapters.gateway import McpGateway
@@ -64,9 +64,9 @@ async def test_mcp(
     }
 
 
-def stored_headers(row: m.McpServer) -> dict:
-    """读取解密后的请求头并转成对象；历史脏数据按空对象处理，不阻断测试。"""
-    text = read_headers(row.headers_enc)
+def stored_secret(value: str | None) -> dict:
+    """读取解密后的 JSON 对象；历史脏数据按空对象处理，不阻断测试。"""
+    text = read_headers(value)
     if not (text or "").strip():
         return {}
     try:
@@ -76,12 +76,31 @@ def stored_headers(row: m.McpServer) -> dict:
     return parsed if isinstance(parsed, dict) else {}
 
 
+def stored_headers(row: m.McpServer) -> dict:
+    return stored_secret(row.headers_enc)
+
+
 def server_draft(row: m.McpServer) -> dict:
+    """运行期调用所需的完整服务配置（含配额、并发、超时与 stdio 环境变量）。"""
     return {
         "id": row.id,
         "transport": row.transport,
         "endpoint": row.endpoint,
         "headers": stored_headers(row),
+        "env": stored_secret(row.env_enc),
+        "timeoutSeconds": row.timeout_seconds,
+        "qpm": row.qpm,
+        "maxConcurrency": row.max_concurrency,
+    }
+
+
+def discover_draft(row: m.McpServer) -> dict:
+    return {
+        "transport": row.transport,
+        "endpoint": row.endpoint,
+        "headers": json.dumps(stored_headers(row), ensure_ascii=False),
+        "env": json.dumps(stored_secret(row.env_enc), ensure_ascii=False),
+        "timeoutSeconds": row.timeout_seconds,
     }
 
 
@@ -131,12 +150,7 @@ async def test_existing_mcp(
     stamp = now_iso()
     started = time.perf_counter()
     try:
-        tools = await McpGateway().discover_tools({
-            "transport": row.transport,
-            "endpoint": row.endpoint,
-            "headers": json.dumps(stored_headers(row), ensure_ascii=False),
-            "timeoutSeconds": row.timeout_seconds,
-        })
+        tools = await McpGateway().discover_tools(discover_draft(row))
     except ApiException as exc:
         row.connection = "error"
         row.last_tested_at = stamp
@@ -179,6 +193,7 @@ async def create_mcp(
     name = validate_name(payload.name, "MCP 名称")
     endpoint = validate_blank(payload.endpoint, "服务地址/命令不能为空")
     validate_json_object(payload.headers)
+    validate_json_object(payload.env, "stdio 环境变量必须是合法的 JSON 对象")
     config = await get_configs(db)
     defaults = config["defaults"]["mcp"]
     tools = await McpGateway().discover_tools(payload.model_dump())
@@ -190,6 +205,7 @@ async def create_mcp(
         transport=payload.transport,
         endpoint=endpoint,
         headers_enc=write_headers(payload.headers),
+        env_enc=write_headers(payload.env),
         timeout_seconds=payload.timeoutSeconds,
         qpm=int(defaults["qpm"]),
         max_concurrency=int(defaults["maxConcurrency"]),
@@ -266,15 +282,55 @@ async def update_mcp(
         validate_blank(patch["endpoint"], "名称与服务地址不能为空")
     if "headers" in patch:
         validate_json_object(patch["headers"])
-    updates = to_row(patch, m.McpServer, aliases={"headers": "headers_enc"})
+    if "env" in patch:
+        validate_json_object(patch["env"], "stdio 环境变量必须是合法的 JSON 对象")
+    updates = to_row(patch, m.McpServer, aliases={"headers": "headers_enc", "env": "env_enc"})
     if "headers" in patch:
         updates["headers_enc"] = write_headers(patch["headers"])
+    if "env" in patch:
+        updates["env_enc"] = write_headers(patch["env"])
     for column, value in updates.items():
         setattr(row, column, value)
     row.updated_at = now_iso()
     await db.flush()
     entity = await mcp_to_dict(db, row)
     return await commit_write(db, entity, "保存 MCP 配置", f"更新 MCP {mcp_id} 的配置", resource_id=mcp_id)
+
+
+@router.delete("/mcps/{mcp_id}", response_model=WriteResponse, summary="删除 MCP")
+async def remove_mcp(
+    mcp_id: str,
+    db: AsyncSession = Depends(get_db),
+    _: m.Session = Depends(current_session),
+) -> dict:
+    row = await get_or_404(db, m.McpServer, mcp_id)
+    name = row.name
+    tool_count = int(
+        await db.scalar(select(func.count()).select_from(m.McpTool).where(m.McpTool.server_id == mcp_id)) or 0
+    )
+    call_count = int(
+        await db.scalar(select(func.count()).select_from(m.McpCallRecord).where(m.McpCallRecord.server_id == mcp_id)) or 0
+    )
+    mounts = (
+        await db.scalars(select(m.AgentMount).where(m.AgentMount.kind == "mcp", m.AgentMount.resource_id == mcp_id))
+    ).all()
+    await db.execute(delete(m.McpTool).where(m.McpTool.server_id == mcp_id))
+    await db.execute(delete(m.McpCallRecord).where(m.McpCallRecord.server_id == mcp_id))
+    await db.execute(
+        delete(m.AgentMount).where(m.AgentMount.kind == "mcp", m.AgentMount.resource_id == mcp_id)
+    )
+    await db.execute(
+        delete(m.Credential).where(
+            m.Credential.type == "mcp_auth_header",
+            m.Credential.resource_id == mcp_id,
+        )
+    )
+    await db.delete(row)
+    return await commit_write(
+        db, None, "删除 MCP",
+        f"删除「{name}」，清理 {tool_count} 个工具与 {call_count} 条调用记录，解除 {len(mounts)} 个智能体挂载",
+        resource_id=mcp_id,
+    )
 
 
 @router.patch("/mcps/{mcp_id}/enabled", response_model=WriteResponse, summary="启停 MCP")

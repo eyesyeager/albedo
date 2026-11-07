@@ -1,8 +1,9 @@
 import re
+import shutil
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, File, Form, UploadFile
-from sqlalchemy import select
+from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import current_session
@@ -179,3 +180,51 @@ async def get_skill(
     _: m.Session = Depends(current_session),
 ) -> dict:
     return await skill_to_dict(db, await get_or_404(db, m.Skill, skill_id))
+
+
+@router.delete("/skills/{skill_id}", response_model=WriteResponse, summary="删除 Skill")
+async def remove_skill(
+    skill_id: str,
+    db: AsyncSession = Depends(get_db),
+    _: m.Session = Depends(current_session),
+) -> dict:
+    row = await get_or_404(db, m.Skill, skill_id)
+    mounts = (
+        await db.scalars(
+            select(m.AgentMount).where(m.AgentMount.kind == "skill", m.AgentMount.resource_id == skill_id)
+        )
+    ).all()
+    if mounts:
+        names = []
+        for mount in mounts:
+            agent = await db.get(m.Agent, mount.agent_id)
+            if agent is not None:
+                names.append(agent.name)
+        detail = f"（{'、'.join(names)}）" if names else ""
+        raise ApiException(
+            "resource_in_use",
+            f"该 Skill 已被 {len(mounts)} 个智能体挂载{detail}，请先在智能体的「能力挂载」中取消挂载后再删除",
+            409,
+        )
+
+    name = row.name
+    version_count = int(
+        await db.scalar(
+            select(func.count()).select_from(m.SkillVersion).where(m.SkillVersion.skill_id == skill_id)
+        )
+        or 0
+    )
+    versions = (
+        await db.scalars(select(m.SkillVersion).where(m.SkillVersion.skill_id == skill_id))
+    ).all()
+    package_paths = [Path(item.file_path) for item in versions if item.file_path]
+    await db.execute(delete(m.SkillVersion).where(m.SkillVersion.skill_id == skill_id))
+    await db.delete(row)
+    result = await commit_write(
+        db, None, "删除 Skill", f"删除「{name}」，同时清理 {version_count} 个历史版本与本地包文件",
+        resource_id=skill_id,
+    )
+    for path in package_paths:
+        path.unlink(missing_ok=True)
+    shutil.rmtree(Path(get_settings().skill_dir) / skill_id, ignore_errors=True)
+    return result

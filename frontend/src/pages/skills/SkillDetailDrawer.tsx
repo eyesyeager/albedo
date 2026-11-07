@@ -1,10 +1,10 @@
-import { CheckCircle2, Clock3, Users } from 'lucide-react'
+import { CheckCircle2, Clock3, Trash2, Users } from 'lucide-react'
 import { formatRelative } from '../../lib/format'
 import { useWorkspace } from '../../store/workspace'
 import { Badge, Button, CopyButton, Drawer } from '../../components/ui'
 import { SkillAvatar } from '../../components/common/GradientAvatar'
 
-export function SkillDetailDrawer({ skillId, onClose }: { skillId: string | null; onClose: () => void }) {
+export function SkillDetailDrawer({ skillId, onClose, onDelete }: { skillId: string | null; onClose: () => void; onDelete: (id: string) => void }) {
   const data = useWorkspace()
   const skill = data.skills.find((item) => item.id === skillId)
   if (!skill) return null
@@ -17,7 +17,19 @@ export function SkillDetailDrawer({ skillId, onClose }: { skillId: string | null
       title={skill.name}
       subtitle={`${skill.fileName} · ${skill.fileSize}`}
       width="md"
-      footer={<CopyButton value={skill.id} label="复制 Skill ID" message="Skill ID 已复制" />}
+      footer={
+        <>
+          <Button
+            variant="ghost"
+            className="mr-auto text-danger hover:bg-danger/10 hover:text-danger"
+            icon={<Trash2 className="h-3.5 w-3.5" />}
+            onClick={() => onDelete(skill.id)}
+          >
+            删除
+          </Button>
+          <CopyButton value={skill.id} label="复制 Skill ID" message="Skill ID 已复制" />
+        </>
+      }
     >
       <div className="space-y-5">
         <div className="flex items-center gap-3 rounded-field border border-line bg-canvas/50 p-3">

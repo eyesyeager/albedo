@@ -699,6 +699,46 @@
             }
           }
         }
+      },
+      "delete": {
+        "tags": [
+          "mcps"
+        ],
+        "summary": "删除 MCP",
+        "operationId": "remove_mcp_api_v1_mcps__mcp_id__delete",
+        "parameters": [
+          {
+            "name": "mcp_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Mcp Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WriteResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
       }
     },
     "/api/v1/mcps/{mcp_id}/calls": {
@@ -1165,6 +1205,46 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/Skill"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "skills"
+        ],
+        "summary": "删除 Skill",
+        "operationId": "remove_skill_api_v1_skills__skill_id__delete",
+        "parameters": [
+          {
+            "name": "skill_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Skill Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WriteResponse"
                 }
               }
             }
@@ -1705,7 +1785,7 @@
         "tags": [
           "agents"
         ],
-        "summary": "测试会话运行（LangGraph 真实模型与工具）",
+        "summary": "测试会话运行（LangGraph 真实模型与工具，Accept: text/event-stream 时流式）",
         "operationId": "test_run_api_v1_agents__agent_id__test_runs_post",
         "parameters": [
           {
@@ -4169,6 +4249,11 @@
             "title": "Headers",
             "default": ""
           },
+          "env": {
+            "type": "string",
+            "title": "Env",
+            "default": ""
+          },
           "timeoutSeconds": {
             "type": "integer",
             "title": "Timeoutseconds",
@@ -4244,6 +4329,17 @@
               }
             ],
             "title": "Headers"
+          },
+          "env": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Env"
           },
           "timeoutSeconds": {
             "anyOf": [
@@ -4339,6 +4435,11 @@
           "headers": {
             "type": "string",
             "title": "Headers"
+          },
+          "env": {
+            "type": "string",
+            "title": "Env",
+            "default": ""
           },
           "timeoutSeconds": {
             "type": "integer",
@@ -4451,6 +4552,11 @@
           "headers": {
             "type": "string",
             "title": "Headers",
+            "default": ""
+          },
+          "env": {
+            "type": "string",
+            "title": "Env",
             "default": ""
           },
           "timeoutSeconds": {

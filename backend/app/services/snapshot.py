@@ -5,11 +5,21 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.security import decrypt_secret
 from app.db import models as m
 from app.services.system_config import get_configs
 from app.services.trends import build_trend_points
 
 MOUNT_KEYS = {"mcp": "mcpIds", "skill": "skillIds", "tool": "toolIds", "model": "modelIds"}
+
+
+def decrypted_env(value: str | None) -> str:
+    if not value:
+        return ""
+    try:
+        return decrypt_secret(value) or ""
+    except Exception:  # noqa: BLE001 - 历史脏数据不暴露密文
+        return ""
 
 
 def snake_to_camel(name: str) -> str:
@@ -28,6 +38,17 @@ def tool_schema_dict(value: str | None) -> dict[str, Any]:
     return parsed if isinstance(parsed, dict) else {}
 
 
+def token_usage_dict(value: Any) -> dict[str, int] | None:
+    """历史日志的 token_usage 可能是 {} 或缺字段，按 0 补齐，避免响应模型校验失败。"""
+    if not isinstance(value, dict) or not value:
+        return None
+    return {
+        "inputTokens": int(value.get("inputTokens") or 0),
+        "outputTokens": int(value.get("outputTokens") or 0),
+        "totalTokens": int(value.get("totalTokens") or 0),
+    }
+
+
 def row_dict(
     row: Any,
     *,
@@ -42,6 +63,8 @@ def row_dict(
     result = {mapping.get(key, snake_to_camel(key)): value for key, value in values.items()}
     if extra:
         result.update(extra)
+    if "tokenUsage" in result:
+        result["tokenUsage"] = token_usage_dict(result["tokenUsage"])
     return result
 
 
@@ -115,7 +138,12 @@ async def build_workspace(session: AsyncSession) -> dict[str, Any]:
             for row in publication_rows
         ],
         "mcps": [
-            row_dict(row, rename={"headers_enc": "headers"}, extra={"tools": tools_by_server[row.id]})
+            row_dict(
+                row,
+                rename={"headers_enc": "headers"},
+                drop={"env_enc"},
+                extra={"env": decrypted_env(row.env_enc), "tools": tools_by_server[row.id]},
+            )
             for row in mcp_rows
         ],
         "skills": [

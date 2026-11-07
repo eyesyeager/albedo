@@ -1,6 +1,5 @@
 """外部服务网关：唯一实现，始终发起真实请求。"""
 
-import asyncio
 import json
 import time
 from typing import Any
@@ -10,7 +9,21 @@ import httpx
 
 from app.core.errors import ApiException
 from app.core.network import assert_public_url
-from app.runtime.mcp_loader import load_server_tools
+from app.runtime.mcp_loader import (
+    invoke_mcp_tool,
+    load_server_tools,
+    stringify_tool_output,
+)
+
+# stringify_tool_output 从连接层迁移后仍由本模块对外导出，保持既有调用方兼容。
+__all__ = [
+    "is_http_url",
+    "is_json_object",
+    "tool_input_schema",
+    "stringify_tool_output",
+    "ModelGateway",
+    "McpGateway",
+]
 
 
 def is_http_url(value: str) -> bool:
@@ -54,24 +67,6 @@ def tool_input_schema(tool: Any) -> dict:
     if isinstance(args, dict) and args:
         return {"type": "object", "properties": args}
     return {}
-
-
-def stringify_tool_output(value: Any, limit: int = 4000) -> str:
-    """把 MCP 工具返回值压平成可展示文本，超长只截断展示、不修改真实数据。"""
-    if isinstance(value, str):
-        text = value
-    elif isinstance(value, (dict, list)):
-        try:
-            text = json.dumps(value, ensure_ascii=False, default=str)
-        except (TypeError, ValueError):
-            text = str(value)
-    elif hasattr(value, "content"):
-        return stringify_tool_output(getattr(value, "content"), limit)
-    else:
-        text = str(value)
-    if len(text) > limit:
-        text = f"{text[:limit]}…（已截断，原始长度 {len(text)} 字符）"
-    return text
 
 
 class ModelGateway:
@@ -152,17 +147,20 @@ class McpGateway:
             raise ApiException("validation_error", "远程 MCP 服务地址必须是合法的 HTTP(S) URL", 400)
         if not is_json_object(headers_text):
             raise ApiException("validation_error", "自定义请求头必须是合法的 JSON 对象", 400)
+        env_text = str(draft.get("env", "") or "")
+        if not is_json_object(env_text):
+            raise ApiException("validation_error", "stdio 环境变量必须是合法的 JSON 对象", 400)
         headers = json.loads(headers_text) if headers_text.strip() else {}
-        if transport != "stdio":
-            await assert_public_url(endpoint)
-
-        timeout = max(8.0, min(30.0, float(draft.get("timeoutSeconds") or 15)))
+        env = json.loads(env_text) if env_text.strip() else {}
+        # SSRF 校验统一由 load_server_tools 执行，按系统配置决定是否放行本地/内网 MCP。
+        timeout = max(8.0, min(120.0, float(draft.get("timeoutSeconds") or 30)))
         tools = await load_server_tools({
             "id": "mcp-probe",
             "transport": transport,
             "endpoint": endpoint,
             "headers": headers,
-        }, timeout=timeout)
+            "env": env,
+        }, timeout=timeout, refresh=True, rethrow_validation=True)
         if not tools:
             raise ApiException(
                 "upstream_unavailable",
@@ -204,26 +202,4 @@ class McpGateway:
                 404,
             )
 
-        started = time.perf_counter()
-        try:
-            value = await asyncio.wait_for(tool.ainvoke(arguments), timeout=timeout)
-        except asyncio.TimeoutError:
-            return {
-                "status": "failed",
-                "durationMs": int((time.perf_counter() - started) * 1000),
-                "output": "",
-                "error": f"调用超时：超过 {int(timeout)} 秒未返回",
-            }
-        except Exception as exc:  # noqa: BLE001 - 上游异常需要原样反馈给测试面板
-            return {
-                "status": "failed",
-                "durationMs": int((time.perf_counter() - started) * 1000),
-                "output": "",
-                "error": f"{type(exc).__name__}: {str(exc)[:300]}",
-            }
-        return {
-            "status": "success",
-            "durationMs": int((time.perf_counter() - started) * 1000),
-            "output": stringify_tool_output(value),
-            "error": None,
-        }
+        return await invoke_mcp_tool(server, tool, arguments, timeout=timeout)

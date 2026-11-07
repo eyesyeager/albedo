@@ -2,20 +2,43 @@ import { useMemo, useState } from 'react'
 import { Plus, Plug, Search } from 'lucide-react'
 import type { McpTransport } from '../types/domain'
 import { useDebouncedValue } from '../hooks/useDebouncedValue'
+import { api } from '../lib/api'
+import { asError } from '../lib/errors'
+import { affectedAgents } from '../store/selectors'
 import { useWorkspace } from '../store/workspace'
-import { Button, EmptyState, Input, Select } from '../components/ui'
+import { Button, ConfirmDialog, EmptyState, Input, Select, toast } from '../components/ui'
 import { PageHeader } from '../components/common/PageHeader'
 import { McpCard, TRANSPORT_LABEL } from './mcp/McpCard'
 import { CreateMcpDialog } from './mcp/CreateMcpDialog'
 import { McpDetailDrawer, type McpTab } from './mcp/McpDetailDrawer'
 
 export function McpPage() {
-  const mcps = useWorkspace((state) => state.mcps)
+  const data = useWorkspace()
+  const mcps = data.mcps
   const [keyword, setKeyword] = useState('')
   const debounced = useDebouncedValue(keyword)
   const [transport, setTransport] = useState<'all' | McpTransport>('all')
   const [createOpen, setCreateOpen] = useState(false)
   const [detail, setDetail] = useState<{ id: string; tab: McpTab } | null>(null)
+  const [deleteId, setDeleteId] = useState<string | null>(null)
+  const [deleting, setDeleting] = useState(false)
+  const deleteMcp = deleteId ? mcps.find((item) => item.id === deleteId) : undefined
+  const deleteAffected = deleteMcp ? affectedAgents(data, 'mcp', deleteMcp.id) : []
+
+  const requestDelete = (id: string) => setDeleteId(id)
+
+  const confirmDelete = () => {
+    if (!deleteId || deleting) return
+    setDeleting(true)
+    api.mcp.remove(deleteId)
+      .then(() => {
+        toast.success('MCP 已删除，工具清单与调用凭证同步销毁')
+        setDeleteId(null)
+        setDetail(null)
+      })
+      .catch((reason: unknown) => toast.error(asError(reason).message))
+      .finally(() => setDeleting(false))
+  }
 
   const filtered = useMemo(() => {
     const query = debounced.trim().toLowerCase()
@@ -75,6 +98,7 @@ export function McpPage() {
               mcp={mcp}
               onConfig={() => setDetail({ id: mcp.id, tab: 'general' })}
               onTools={() => setDetail({ id: mcp.id, tab: 'tools' })}
+              onDelete={() => requestDelete(mcp.id)}
             />
           ))}
         </div>
@@ -86,8 +110,24 @@ export function McpPage() {
 
       <CreateMcpDialog open={createOpen} onClose={() => setCreateOpen(false)} />
       {detail && (
-        <McpDetailDrawer mcpId={detail.id} initialTab={detail.tab} onClose={() => setDetail(null)} />
+        <McpDetailDrawer mcpId={detail.id} initialTab={detail.tab} onClose={() => setDetail(null)} onDelete={requestDelete} />
       )}
+
+      <ConfirmDialog
+        open={deleteId !== null}
+        onClose={() => setDeleteId(null)}
+        onConfirm={confirmDelete}
+        title={`删除「${deleteMcp?.name ?? ''}」？`}
+        description="删除后该 MCP 服务器的工具清单、调用记录与请求头凭证将一并销毁，操作不可恢复，操作记录会写入系统日志。"
+        confirmText="确认删除"
+        danger
+        loading={deleting}
+        impacts={[
+          `受影响智能体：${deleteAffected.length} 个${deleteAffected.length ? `（${deleteAffected.map((agent) => agent.name).join('、')}）` : ''}，挂载引用会被移除`,
+          `可用工具：${deleteMcp?.tools.filter((tool) => tool.enabled).length ?? 0} 个，删除后全部不可调用`,
+          '自定义 Header 与 stdio 环境变量凭证随服务一并清除，恢复需重新接入并测试连接',
+        ]}
+      />
     </div>
   )
 }

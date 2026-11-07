@@ -2,8 +2,10 @@ import { useMemo, useState } from 'react'
 import { Blocks, Plus, Search } from 'lucide-react'
 import { formatDateTime } from '../lib/format'
 import { useDebouncedValue } from '../hooks/useDebouncedValue'
+import { api } from '../lib/api'
+import { asError } from '../lib/errors'
 import { useWorkspace } from '../store/workspace'
-import { Button, EmptyState, Input, Modal, Badge } from '../components/ui'
+import { Button, ConfirmDialog, EmptyState, Input, Modal, Badge, toast } from '../components/ui'
 import { PageHeader } from '../components/common/PageHeader'
 import { SkillCard } from './skills/SkillCard'
 import { SkillDetailDrawer } from './skills/SkillDetailDrawer'
@@ -17,6 +19,8 @@ export function SkillsPage() {
   const [uploadTargetId, setUploadTargetId] = useState<string | null>(null)
   const [detailId, setDetailId] = useState<string | null>(null)
   const [versionId, setVersionId] = useState<string | null>(null)
+  const [deleteId, setDeleteId] = useState<string | null>(null)
+  const [deleting, setDeleting] = useState(false)
 
   const filtered = useMemo(() => {
     const query = debounced.trim().toLowerCase()
@@ -25,7 +29,36 @@ export function SkillsPage() {
 
   const versionSkill = data.skills.find((skill) => skill.id === versionId)
   const uploadTarget = data.skills.find((skill) => skill.id === uploadTargetId) ?? null
+  const deleteSkill = data.skills.find((skill) => skill.id === deleteId) ?? null
+  const deleteAgents = deleteSkill
+    ? data.agents.filter((agent) => agent.mounts.skillIds.includes(deleteSkill.id)).map((agent) => agent.name)
+    : []
   const referencedCount = (skillId: string) => data.agents.filter((agent) => agent.mounts.skillIds.includes(skillId)).length
+
+  const requestDelete = (skillId: string) => {
+    const skill = data.skills.find((item) => item.id === skillId)
+    if (!skill) return
+    const used = referencedCount(skill.id)
+    if (used > 0) {
+      toast.error(`「${skill.name}」已被 ${used} 个智能体挂载，请先在智能体「能力挂载」中取消挂载后再删除`)
+      return
+    }
+    setDetailId(null)
+    setDeleteId(skill.id)
+  }
+
+  const confirmDelete = () => {
+    if (!deleteId || deleting) return
+    setDeleting(true)
+    api.skills
+      .remove(deleteId)
+      .then(() => {
+        toast.success('Skill 已删除，历史版本与本地包文件同步清理')
+        setDeleteId(null)
+      })
+      .catch((reason: unknown) => toast.error(asError(reason).message))
+      .finally(() => setDeleting(false))
+  }
 
   return (
     <div className="mx-auto max-w-[1400px]">
@@ -72,7 +105,19 @@ export function SkillsPage() {
       )}
 
       <UploadSkillDialog open={uploadOpen} targetSkill={uploadTarget} onClose={() => { setUploadOpen(false); setUploadTargetId(null) }} />
-      {detailId && <SkillDetailDrawer skillId={detailId} onClose={() => setDetailId(null)} />}
+      {detailId && <SkillDetailDrawer skillId={detailId} onClose={() => setDetailId(null)} onDelete={requestDelete} />}
+
+      <ConfirmDialog
+        open={deleteId !== null}
+        onClose={() => setDeleteId(null)}
+        onConfirm={confirmDelete}
+        title={`删除 Skill · ${deleteSkill?.name ?? ''}`}
+        description="删除后该 Skill 及其全部历史版本、本地包文件将不可恢复，操作会写入系统操作日志。"
+        confirmText="删除"
+        danger
+        loading={deleting}
+        impacts={deleteAgents.length > 0 ? deleteAgents.map((name) => `仍被智能体「${name}」挂载，需先取消挂载`) : undefined}
+      />
 
       <Modal
         open={versionId !== null}

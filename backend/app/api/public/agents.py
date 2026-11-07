@@ -80,10 +80,21 @@ def completion_payload(result: Any, agent_id: str, include_usage: bool) -> dict[
     return payload
 
 
+def final_assistant_text(result: Any) -> str:
+    """从运行结果取最后一条 assistant 文本，供流式无正文增量时兜底。"""
+    if result is None:
+        return ""
+    for message in reversed(getattr(result, "messages", None) or []):
+        if message.get("role") == "assistant" and str(message.get("content") or "").strip():
+            return str(message["content"])
+    return ""
+
+
 async def chat_stream(db: AsyncSession, agent: m.Agent, runtime_request: Any, snapshot: dict):
     """真增量 SSE：逐 token 消费引擎事件，不等待整轮运行完成。"""
     message_id = ""
     ended = False
+    sent_delta = False
     pending_error: dict[str, Any] | None = None
     try:
         async for engine_event in get_runtime_engine().run_stream(runtime_request):
@@ -91,11 +102,15 @@ async def chat_stream(db: AsyncSession, agent: m.Agent, runtime_request: Any, sn
             if kind == "run_started":
                 message_id = new_id("msg-")
                 yield sse("message.start", {"type": "message.start", "messageId": message_id, "role": "assistant"})
+            elif kind == "thinking_delta":
+                # 推理模型的思考增量必须与正文分开转发，否则整轮推理期间 SSE 静默。
+                yield sse("message.thinking", {"type": "message.thinking", "delta": engine_event.get("delta", "")})
             elif kind == "message_start":
                 if not message_id:
                     message_id = engine_event["messageId"]
                     yield sse("message.start", {"type": "message.start", "messageId": message_id, "role": "assistant"})
             elif kind == "token":
+                sent_delta = True
                 current = message_id or engine_event["messageId"]
                 yield sse("message.delta", {"type": "message.delta", "messageId": current, "delta": engine_event["delta"]})
             elif kind == "message_end":
@@ -114,6 +129,15 @@ async def chat_stream(db: AsyncSession, agent: m.Agent, runtime_request: Any, sn
                         int(engine_event.get("durationMs") or 0),
                         snapshot,
                     )
+                # 只输出 reasoning / 运行超时时没有正文 token，补发最终结果或终止说明，
+                # 否则流式客户端只能拿到空消息。
+                if not sent_delta:
+                    fallback = final_assistant_text(result)
+                    if fallback:
+                        yield sse("message.delta", {
+                            "type": "message.delta", "messageId": message_id or new_id("msg-"), "delta": fallback,
+                        })
+                        sent_delta = True
                 if kind == "run_error":
                     pending_error = {
                         "type": "message.error",
@@ -173,6 +197,8 @@ def to_agui_events(event: dict[str, Any]) -> list[dict[str, Any]]:
 async def agui_stream(db: AsyncSession, agent: m.Agent, runtime_request: Any, snapshot: dict, thread_id: str):
     sequence = 0
     pending: list[dict[str, Any]] = []
+    thinking_id = ""
+    sent_text = False
 
     async def emit(payload: dict[str, Any]) -> dict[str, Any]:
         nonlocal sequence
@@ -190,9 +216,38 @@ async def agui_stream(db: AsyncSession, agent: m.Agent, runtime_request: Any, sn
             pending.clear()
         return event
 
+    async def push(payload: dict[str, Any]) -> str:
+        event = await emit(payload)
+        return sse(event["type"], event)
+
+    async def close_thinking() -> list[str]:
+        nonlocal thinking_id
+        if not thinking_id:
+            return []
+        frame = await push({"type": "THINKING_TEXT_MESSAGE_END", "messageId": thinking_id})
+        thinking_id = ""
+        return [frame]
+
     try:
         async for engine_event in get_runtime_engine().run_stream(runtime_request):
-            if engine_event["type"] in ("run_finished", "run_error"):
+            kind = engine_event["type"]
+            # AGUI v1 的思考消息与正式回答分开发送，避免推理阶段整段静默。
+            if kind == "thinking_delta":
+                delta = str(engine_event.get("delta") or "")
+                if not delta:
+                    continue
+                if not thinking_id:
+                    thinking_id = new_id("msg-")
+                    yield await push({
+                        "type": "THINKING_TEXT_MESSAGE_START", "messageId": thinking_id, "role": "assistant",
+                    })
+                yield await push({"type": "THINKING_TEXT_MESSAGE_CONTENT", "messageId": thinking_id, "delta": delta})
+                continue
+            for frame in await close_thinking():
+                yield frame
+            if kind == "token":
+                sent_text = True
+            if kind in ("run_finished", "run_error"):
                 result = engine_event.get("result")
                 if result is not None:
                     await persist_result(db, agent, result, snapshot, "agui")
@@ -203,12 +258,23 @@ async def agui_stream(db: AsyncSession, agent: m.Agent, runtime_request: Any, sn
                         int(engine_event.get("durationMs") or 0),
                         snapshot,
                     )
+                # 推理模型只输出 reasoning_content、或运行在正文出现前超时，流式里没有任何
+                # TEXT_MESSAGE_CONTENT。此时把最终结果 / 终止说明补成一条完整文本消息，
+                # 保证 AGUI 客户端一定能拿到响应内容。
+                if not sent_text:
+                    fallback = final_assistant_text(result)
+                    if fallback:
+                        message_id = new_id("msg-")
+                        yield await push({"type": "TEXT_MESSAGE_START", "messageId": message_id, "role": "assistant"})
+                        yield await push({"type": "TEXT_MESSAGE_CONTENT", "messageId": message_id, "delta": fallback})
+                        yield await push({"type": "TEXT_MESSAGE_END", "messageId": message_id})
+                        sent_text = True
             for payload in to_agui_events(engine_event):
-                event = await emit(payload)
-                yield sse(event["type"], event)
+                yield await push(payload)
     except Exception as exc:  # noqa: BLE001
-        event = await emit({"type": "RUN_ERROR", "code": "agent_run_failed", "message": str(exc)[:200]})
-        yield sse("RUN_ERROR", event)
+        for frame in await close_thinking():
+            yield frame
+        yield await push({"type": "RUN_ERROR", "code": "agent_run_failed", "message": str(exc)[:200]})
     finally:
         if pending:
             await append_events(runtime_request.run_id, pending)

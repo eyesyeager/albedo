@@ -213,3 +213,101 @@ async def test_public_agent_not_published(client: AsyncClient) -> None:
     )
     assert response.status_code == 409
     assert response.json()["error"]["code"] == "agent_not_published"
+
+
+def test_live_model_timeout_covers_max_run_seconds() -> None:
+    """推理模型首 token 很慢时，上游读超时不得短于整轮 maxRunSeconds。"""
+    from app.runtime.live_model import build_live_model
+
+    model = build_live_model({"advanced": {"maxRunSeconds": 300}, "modelParams": {}}, [], "")
+    assert float(model.request_timeout) >= 300
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "terminal,answer",
+    [
+        ("run_finished", "这是最终答案"),
+        ("run_error", "本次运行超过 300 秒上限，已终止。"),
+    ],
+)
+async def test_agui_stream_returns_text_when_only_reasoning_was_streamed(monkeypatch, terminal, answer) -> None:
+    """推理模型只输出 reasoning_content（或正文出现前超时）时 AGUI 仍须给出文本。"""
+    from types import SimpleNamespace
+
+    from app.api.public import agents as public_agents
+
+    class ReasoningOnlyEngine:
+        async def run_stream(self, request):
+            yield {"type": "run_started", "runId": request.run_id, "threadId": request.thread_id}
+            yield {"type": "thinking_delta", "delta": "先梳理问题。"}
+            yield {"type": "thinking_delta", "delta": "再检查论证。"}
+            yield {
+                "type": terminal,
+                "code": "agent_run_timeout" if terminal == "run_error" else "",
+                "message": "运行超过最大时长限制，已终止" if terminal == "run_error" else "",
+                "result": SimpleNamespace(
+                    messages=[{"role": "user", "content": "hi"}, {"role": "assistant", "content": answer}],
+                    logs=[], usage={}, duration_ms=10,
+                    finish_reason="timeout" if terminal == "run_error" else "stop",
+                    run_id=request.run_id, thread_id=request.thread_id, tool_call_count=0,
+                ),
+            }
+
+    async def no_persist(*args, **kwargs):
+        return None
+
+    monkeypatch.setattr(public_agents, "get_runtime_engine", lambda: ReasoningOnlyEngine())
+    monkeypatch.setattr(public_agents, "persist_result", no_persist)
+    monkeypatch.setattr(public_agents, "persist_failure_logs", no_persist)
+    monkeypatch.setattr(public_agents, "append_events", no_persist)
+
+    request = SimpleNamespace(run_id="run_reasoning_only", thread_id="thd_reasoning_only")
+    body = "".join([frame async for frame in public_agents.agui_stream(None, None, request, {}, request.thread_id)])
+
+    events = sse_events(body)
+    data = sse_data(body)
+    assert events[0] == "RUN_STARTED"
+    assert events[-1] == ("RUN_FINISHED" if terminal == "run_finished" else "RUN_ERROR")
+    assert events.count("THINKING_TEXT_MESSAGE_START") == 1
+    assert events.count("THINKING_TEXT_MESSAGE_CONTENT") == 2
+    assert events.count("THINKING_TEXT_MESSAGE_END") == 1
+    assert "TEXT_MESSAGE_START" in events and "TEXT_MESSAGE_END" in events
+    text = "".join(str(item.get("delta") or "") for item in data if item["type"] == "TEXT_MESSAGE_CONTENT")
+    assert text == answer
+    assert [item["sequence"] for item in data] == list(range(1, len(data) + 1))
+
+
+@pytest.mark.asyncio
+async def test_public_chat_stream_returns_text_when_only_reasoning_was_streamed(monkeypatch) -> None:
+    """标准 API 流同样不能因为只有 reasoning 增量而返回空消息。"""
+    from types import SimpleNamespace
+
+    from app.api.public import agents as public_agents
+
+    class ReasoningOnlyEngine:
+        async def run_stream(self, request):
+            yield {"type": "run_started", "runId": request.run_id, "threadId": request.thread_id}
+            yield {"type": "thinking_delta", "delta": "先梳理问题。"}
+            yield {
+                "type": "run_finished",
+                "result": SimpleNamespace(
+                    messages=[{"role": "assistant", "content": "最终回复"}],
+                    logs=[], usage={}, duration_ms=10, finish_reason="stop",
+                    run_id=request.run_id, thread_id=request.thread_id, tool_call_count=0,
+                ),
+            }
+
+    async def no_persist(*args, **kwargs):
+        return None
+
+    monkeypatch.setattr(public_agents, "get_runtime_engine", lambda: ReasoningOnlyEngine())
+    monkeypatch.setattr(public_agents, "persist_result", no_persist)
+
+    request = SimpleNamespace(run_id="run_chat_reasoning", thread_id="thd_chat_reasoning")
+    body = "".join([frame async for frame in public_agents.chat_stream(None, None, request, {})])
+    events = sse_events(body)
+    data = sse_data(body)
+    assert "message.thinking" in events
+    assert events[-1] == "message.end"
+    assert any(item.get("delta") == "最终回复" for item in data if item.get("type") == "message.delta")

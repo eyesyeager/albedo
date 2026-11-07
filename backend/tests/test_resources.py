@@ -1,5 +1,6 @@
 import io
 import zipfile
+from pathlib import Path
 
 import pytest
 from httpx import AsyncClient
@@ -127,6 +128,13 @@ async def test_mcp_crud_and_tool_toggle(client: AsyncClient) -> None:
     assert current["callCount"] == 1
     assert current["successRate"] == 100.0
 
+    removed = await client.delete(f"/api/v1/mcps/{entity['id']}")
+    assert removed.status_code == 200, removed.text
+    assert removed.json()["log"]["resourceId"] == entity["id"]
+    assert (await client.get(f"/api/v1/mcps/{entity['id']}")).status_code == 404
+    remaining = (await client.get("/api/v1/mcps")).json()
+    assert all(item["id"] != entity["id"] for item in remaining)
+
 
 @pytest.mark.asyncio
 async def test_mcp_tool_test_records_failure(client: AsyncClient, monkeypatch) -> None:
@@ -185,6 +193,42 @@ async def test_skill_upload_and_version(client: AsyncClient) -> None:
     assert counted.json()["referencedBy"] == 1
     bootstrap = await client.get("/api/v1/workspace/bootstrap")
     assert next(item for item in bootstrap.json()["skills"] if item["id"] == entity["id"])["referencedBy"] == 1
+
+
+@pytest.mark.asyncio
+async def test_skill_delete_blocks_referenced_and_cleans_package(client: AsyncClient) -> None:
+    await login(client)
+    payload = skill_zip()
+    files = {"file": ("demo-skill.zip", payload, "application/zip")}
+    data = {"name": "待删除 Skill", "instructions": "功能：删除测试。使用步骤：上传后删除。", "fileName": "demo-skill.zip", "sizeBytes": len(payload)}
+    created = await client.post("/api/v1/skills", data=data, files=files)
+    assert created.status_code == 201, created.text
+    entity = created.json()["entity"]
+    package_dir = Path(get_settings().skill_dir) / entity["id"]
+    assert package_dir.exists()
+
+    # 被 Agent 挂载时必须阻止删除，且不留下半删除状态。
+    mounted = await client.patch("/api/v1/agents/agt-data", json={
+        "mounts": {"mcpIds": [], "skillIds": [entity["id"]], "toolIds": [], "modelIds": ["mdl-gpt"]},
+    })
+    assert mounted.status_code == 200, mounted.text
+    blocked = await client.delete(f"/api/v1/skills/{entity['id']}")
+    assert blocked.status_code == 409, blocked.text
+    assert blocked.json()["error"]["code"] == "resource_in_use"
+    assert (await client.get(f"/api/v1/skills/{entity['id']}")).status_code == 200
+    assert package_dir.exists()
+
+    # 取消挂载后可删除：资源、历史版本与本地包文件一并清理，并写入操作日志。
+    released = await client.patch("/api/v1/agents/agt-data", json={
+        "mounts": {"mcpIds": [], "skillIds": [], "toolIds": [], "modelIds": ["mdl-gpt"]},
+    })
+    assert released.status_code == 200, released.text
+    removed = await client.delete(f"/api/v1/skills/{entity['id']}")
+    assert removed.status_code == 200, removed.text
+    assert removed.json()["log"]["name"] == "删除 Skill"
+    assert (await client.get(f"/api/v1/skills/{entity['id']}")).status_code == 404
+    assert not package_dir.exists()
+    assert (await client.delete(f"/api/v1/skills/{entity['id']}")).status_code == 404
 
 
 def test_tool_input_schema_normalization() -> None:

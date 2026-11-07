@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
-import { ArrowLeft, Bot, Play, Save } from 'lucide-react'
+import { ArrowLeft, Bot, Play, Save, Trash2 } from 'lucide-react'
 import type { Agent, LogEntry } from '../types/domain'
 import { formatRelative } from '../lib/format'
 import { api } from '../lib/api'
@@ -39,6 +39,9 @@ export function AgentDetailPage() {
   const [historyLoading, setHistoryLoading] = useState(false)
   const [historyError, setHistoryError] = useState('')
   const [historyVersion, setHistoryVersion] = useState(0)
+  const [deleteOpen, setDeleteOpen] = useState(false)
+  const [deleting, setDeleting] = useState(false)
+  const [deleted, setDeleted] = useState(false)
   const blocker = useUnsavedGuard(dirty)
 
   useEffect(() => {
@@ -73,6 +76,11 @@ export function AgentDetailPage() {
     setSection('basic')
   }, [agentId])
 
+  useEffect(() => {
+    // 删除成功后在 dirty 复位的那次渲染再跳转，避免触发未保存修改拦截。
+    if (deleted && !dirty) navigate('/agents', { replace: true })
+  }, [deleted, dirty, navigate])
+
   const change = (patch: Partial<Agent>) => {
     setDraft((current) => (current ? { ...current, ...patch } : current))
     setDirty(true)
@@ -101,6 +109,21 @@ export function AgentDetailPage() {
     setSection('basic')
     setFocusSignal((value) => value + 1)
     toast.info('已进入测试会话，可直接提问验证配置')
+  }
+
+  const remove = () => {
+    if (deleting) return
+    setDeleting(true)
+    api.agents
+      .remove(agentId)
+      .then(() => {
+        setDeleteOpen(false)
+        toast.success('智能体已删除，挂载配置与凭证同步清理')
+        setDirty(false)
+        setDeleted(true)
+      })
+      .catch((reason: unknown) => toast.error(asError(reason).message))
+      .finally(() => setDeleting(false))
   }
 
   if (!agent || !draft) {
@@ -138,6 +161,15 @@ export function AgentDetailPage() {
         <div className="flex items-center gap-2">
           <Button variant="outline" icon={<Play className="h-3.5 w-3.5" />} onClick={run}>运行</Button>
           <Button icon={<Save className="h-3.5 w-3.5" />} loading={saving} onClick={save}>保存配置</Button>
+          <Button
+            variant="ghost"
+            icon={<Trash2 className="h-3.5 w-3.5" />}
+            aria-label="删除智能体"
+            className="text-ink-faint hover:bg-danger/10 hover:text-danger"
+            onClick={() => setDeleteOpen(true)}
+          >
+            删除
+          </Button>
         </div>
       </div>
 
@@ -186,6 +218,22 @@ export function AgentDetailPage() {
         cancelText="继续编辑"
         danger
         impacts={['未保存的名称、提示词、模型参数、能力挂载与高级设置都会被丢弃']}
+      />
+
+      <ConfirmDialog
+        open={deleteOpen}
+        onClose={() => setDeleteOpen(false)}
+        onConfirm={remove}
+        title={`删除智能体 · ${agent.name}`}
+        description="删除后该智能体及其测试会话、能力挂载与访问凭证都将不可恢复，操作会写入系统操作日志。"
+        confirmText="删除"
+        danger
+        loading={deleting}
+        impacts={[
+          isAgentPublished(agent) ? '已开启的 API / AGUI 对外接口将立即不可用' : '该智能体将不再出现在列表中',
+          '已挂载的 MCP、Skill、工具与模型配置会一并解除',
+          '测试会话、访问凭证与对话历史会被清除',
+        ]}
       />
     </div>
   )

@@ -30,16 +30,23 @@ interface WorkspaceStore extends WorkspaceData {
   removePublication: (id: string) => void
   upsertMcp: (mcp: McpServer) => void
   patchMcp: (id: string, patch: Partial<McpServer>) => void
+  removeMcp: (id: string) => void
   patchMcpTool: (mcpId: string, toolId: string, enabled: boolean) => void
   patchMcpToolSchema: (mcpId: string, toolId: string, inputSchema: McpToolInputSchema) => void
   addSkill: (skill: Skill) => void
   patchSkill: (id: string, patch: Partial<Skill>) => void
+  removeSkill: (id: string) => void
   patchTool: (id: string, patch: Partial<BuiltinTool>) => void
   appendLogs: (entries: LogEntry[]) => void
   addExportTask: (task: ExportTask) => void
   patchSettings: (patch: Partial<WorkspaceSettings>) => void
   markAllNotificationsRead: () => void
   appendChatMessages: (agentId: string, messages: ChatMessage[]) => void
+  appendChatMessage: (agentId: string, message: ChatMessage) => void
+  patchChatMessage: (agentId: string, id: string, patch: Partial<ChatMessage>) => void
+  appendChatDelta: (agentId: string, id: string, delta: string) => void
+  appendChatThinking: (agentId: string, id: string, delta: string) => void
+  commitChatRun: (agentId: string, dropIds: string[], messages: ChatMessage[]) => void
   clearChat: (agentId: string) => void
 }
 
@@ -105,6 +112,14 @@ export const useWorkspace = create<WorkspaceStore>()((set) => ({
     })),
   patchMcp: (id, patch) =>
     set((state) => ({ mcps: updateById(state.mcps, id, { ...patch, updatedAt: new Date().toISOString() }) })),
+  removeMcp: (id) =>
+    set((state) => ({
+      mcps: state.mcps.filter((item) => item.id !== id),
+      agents: state.agents.map((agent) => ({
+        ...agent,
+        mounts: { ...agent.mounts, mcpIds: agent.mounts.mcpIds.filter((mcpId) => mcpId !== id) },
+      })),
+    })),
   patchMcpTool: (mcpId, toolId, enabled) =>
     set((state) => ({
       mcps: state.mcps.map((mcp) =>
@@ -123,6 +138,14 @@ export const useWorkspace = create<WorkspaceStore>()((set) => ({
     })),
   addSkill: (skill) => set((state) => ({ skills: [skill, ...state.skills] })),
   patchSkill: (id, patch) => set((state) => ({ skills: updateById(state.skills, id, patch) })),
+  removeSkill: (id) =>
+    set((state) => ({
+      skills: state.skills.filter((item) => item.id !== id),
+      agents: state.agents.map((agent) => ({
+        ...agent,
+        mounts: { ...agent.mounts, skillIds: agent.mounts.skillIds.filter((skillId) => skillId !== id) },
+      })),
+    })),
   patchTool: (id, patch) => set((state) => ({ tools: updateById(state.tools, id, patch) })),
   appendLogs: (entries) =>
     set((state) => ({ logs: [...entries, ...state.logs].sort(byTimeDesc).slice(0, 200) })),
@@ -134,5 +157,37 @@ export const useWorkspace = create<WorkspaceStore>()((set) => ({
     set((state) => ({
       chatSessions: { ...state.chatSessions, [agentId]: [...(state.chatSessions[agentId] ?? []), ...messages] },
     })),
+  appendChatMessage: (agentId, message) =>
+    set((state) => ({
+      chatSessions: { ...state.chatSessions, [agentId]: [...(state.chatSessions[agentId] ?? []), message] },
+    })),
+  patchChatMessage: (agentId, id, patch) =>
+    set((state) => ({
+      chatSessions: { ...state.chatSessions, [agentId]: updateById(state.chatSessions[agentId] ?? [], id, patch) },
+    })),
+  appendChatDelta: (agentId, id, delta) =>
+    set((state) => ({
+      chatSessions: {
+        ...state.chatSessions,
+        [agentId]: (state.chatSessions[agentId] ?? []).map((message) =>
+          message.id === id ? { ...message, content: message.content + delta } : message,
+        ),
+      },
+    })),
+  appendChatThinking: (agentId, id, delta) =>
+    set((state) => ({
+      chatSessions: {
+        ...state.chatSessions,
+        [agentId]: (state.chatSessions[agentId] ?? []).map((message) =>
+          message.id === id ? { ...message, thinking: (message.thinking ?? '') + delta } : message,
+        ),
+      },
+    })),
+  commitChatRun: (agentId, dropIds, messages) =>
+    set((state) => {
+      const dropped = new Set(dropIds)
+      const kept = (state.chatSessions[agentId] ?? []).filter((message) => !dropped.has(message.id))
+      return { chatSessions: { ...state.chatSessions, [agentId]: [...kept, ...messages] } }
+    }),
   clearChat: (agentId) => set((state) => ({ chatSessions: { ...state.chatSessions, [agentId]: [] } })),
 }))

@@ -11,6 +11,7 @@ from app.core.errors import install_error_handlers
 from app.core.logging import configure_logging
 from app.core.redis_client import close_redis
 from app.db.session import SessionLocal, dispose_engine
+from app.runtime.mcp_loader import close_all_sessions
 from app.middleware.request_id import RequestIdMiddleware
 from app.services.system_config import get_configs
 
@@ -25,6 +26,7 @@ async def lifespan(_: FastAPI):
     except Exception as exc:  # 数据库尚未初始化时仍允许启动健康检查
         logger.warning("启动时未能加载系统配置，将使用初始化默认值：%s", exc)
     yield
+    await close_all_sessions()
     await close_redis()
     await dispose_engine()
 

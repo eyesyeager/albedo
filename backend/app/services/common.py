@@ -78,8 +78,9 @@ def tool_to_dict(row: m.BuiltinTool) -> dict[str, Any]:
 
 
 async def mcp_to_dict(session: AsyncSession, row: m.McpServer) -> dict[str, Any]:
-    data = row_dict(row, rename={"headers_enc": "headers"})
+    data = row_dict(row, rename={"headers_enc": "headers", "env_enc": "env"})
     data["headers"] = read_headers(row.headers_enc)
+    data["env"] = read_headers(row.env_enc) or ""
     tools = (await session.scalars(select(m.McpTool).where(m.McpTool.server_id == row.id).order_by(m.McpTool.id))).all()
     data["tools"] = [
         {

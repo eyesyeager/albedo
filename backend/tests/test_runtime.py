@@ -214,3 +214,23 @@ async def test_engine_degrades_when_checkpointer_fails() -> None:
     assert saver.reads == 1
     assert result.finish_reason == "stop"
     assert [message["role"] for message in result.messages] == ["user", "assistant"]
+
+
+@pytest.mark.asyncio
+async def test_skill_instructions_runner_keeps_full_text_and_reports_truncation() -> None:
+    from app.runtime.tools import skill_instructions_runner
+
+    text = "指令段落。" * 800  # 4000 字
+
+    full = json.loads(await skill_instructions_runner("t0_skill", text, 40000)())
+    assert full["status"] == "loaded"
+    assert full["truncated"] is False
+    assert full["totalChars"] == len(text)
+    assert full["instructions"] == text
+    assert "已全量提供" in full["summary"]
+
+    cut = json.loads(await skill_instructions_runner("t0_skill", text, 1000)())
+    assert cut["truncated"] is True
+    assert len(cut["instructions"]) == 1000
+    assert cut["totalChars"] == len(text)
+    assert "本次提供前 1000 字" in cut["summary"]

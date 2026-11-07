@@ -70,18 +70,6 @@ def remote_mcps() -> list[dict]:
             "endpoint": "https://mcp.context7.com/mcp",
         },
         {
-            "name": "Cloudflare 官方文档",
-            "description": "Cloudflare 官方文档检索（Workers、Pages、R2、D1 等），免密钥。",
-            "transport": "streamable_http",
-            "endpoint": "https://docs.mcp.cloudflare.com/mcp",
-        },
-        {
-            "name": "GitMCP 仓库文档检索",
-            "description": "GitMCP 免密钥实例，按仓库提供文档与代码检索；换仓库只需改 endpoint 路径。",
-            "transport": "streamable_http",
-            "endpoint": "https://gitmcp.io/modelcontextprotocol/modelcontextprotocol",
-        },
-        {
             "name": "grep.app 代码搜索",
             "description": "跨 GitHub 公开仓库的真实代码搜索，免密钥。",
             "transport": "streamable_http",
@@ -98,25 +86,12 @@ def remote_mcps() -> list[dict]:
 
 def stdio_mcps() -> list[dict]:
     npx = shutil.which("npx") or "npx"
-    uvx = shutil.which("uvx") or "uvx"
     return [
         {
             "name": "本地文件系统（工作区）",
             "description": f"官方 filesystem MCP，允许智能体读写 albedo 项目目录：{PROJECT_ROOT}",
             "transport": "stdio",
             "endpoint": f"{npx} -y @modelcontextprotocol/server-filesystem {PROJECT_ROOT}",
-        },
-        {
-            "name": "结构化思考（sequential-thinking）",
-            "description": "官方 sequential thinking MCP，把复杂问题拆成可回溯的思维步骤。",
-            "transport": "stdio",
-            "endpoint": f"{npx} -y @modelcontextprotocol/server-sequential-thinking",
-        },
-        {
-            "name": "免密钥网页搜索（DuckDuckGo）",
-            "description": "本地 stdio MCP，提供 DuckDuckGo 搜索与网页正文抽取，无需任何 API Key。",
-            "transport": "stdio",
-            "endpoint": f"{uvx} duckduckgo-mcp-server",
         },
     ]
 

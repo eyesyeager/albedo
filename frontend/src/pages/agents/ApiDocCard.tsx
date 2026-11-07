@@ -43,6 +43,7 @@ const AGUI_REQUEST: DocRow[] = [
 const AGUI_EVENTS: DocRow[] = [
   { field: 'RUN_STARTED', type: '事件', required: '首个', description: '本次运行已创建，携带 Agent ID 与开始时间' },
   { field: 'TEXT_MESSAGE_START / CONTENT / END', type: '事件', required: '配对', description: '文本消息按 START → CONTENT(0~N) → END 输出' },
+  { field: 'THINKING_TEXT_MESSAGE_START / CONTENT / END', type: '事件', required: '可选', description: '推理模型的思考增量，与正式回答分开输出' },
   { field: 'TOOL_CALL_START / ARGS / END / RESULT', type: '事件', required: '配对', description: '工具调用参数与结果摘要，默认不返回敏感完整值' },
   { field: 'STATE_SNAPSHOT / STATE_DELTA', type: '事件', required: '可选', description: '下发完整共享状态或 JSON Patch 增量' },
   { field: 'RUN_FINISHED', type: '事件', required: '终止', description: 'Run 正常结束，返回状态、Token 与耗时' },

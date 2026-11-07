@@ -29,7 +29,9 @@ import type {
 } from '../types/domain'
 import { useAuth } from '../store/auth'
 import { useWorkspace } from '../store/workspace'
-import { http, httpBlob, hydrate, jsonBody, replaceFromServer, fetchSession, fetchBootstrap } from './http'
+import { ApiError } from './errors'
+import { http, httpBlob, hydrate, jsonBody, openEventStream, replaceFromServer, fetchSession, fetchBootstrap } from './http'
+import { readSse } from './sse'
 
 interface WriteResponse<T> {
   entity?: T
@@ -246,6 +248,11 @@ export const api = {
       if (response.entity) state().upsertMcp(response.entity)
       syncLog(response.log)
     },
+    async remove(id: string): Promise<void> {
+      const response = await del<WriteResponse<never>>(`/mcps/${id}`)
+      state().removeMcp(id)
+      syncLog(response.log)
+    },
     async toggle(id: string, enabled: boolean): Promise<void> {
       const response = await patch<WriteResponse<McpServer>>(`/mcps/${id}`, { enabled })
       if (response.entity) state().upsertMcp(response.entity)
@@ -277,6 +284,11 @@ export const api = {
       state().patchSkill(skillId, skill)
       syncLog(response.log)
       return skill
+    },
+    async remove(skillId: string): Promise<void> {
+      const response = await del<WriteResponse<never>>(`/skills/${skillId}`)
+      state().removeSkill(skillId)
+      syncLog(response.log)
     },
   },
 
@@ -359,6 +371,146 @@ export const api = {
       syncLogs(response.logs)
       if (response.sessionCount !== undefined) state().patchAgent(agentId, { sessionCount: response.sessionCount })
       return { messages, runId: response.runId, threadId: response.threadId }
+    },
+    /** 流式测试会话：先本地占位渲染增量 token，run.finished 时用服务端权威消息替换。 */
+    async stream(agentId: string, content: string, modelId: string): Promise<SendResult> {
+      const stamp = (): string => new Date().toISOString()
+      const pendingIds: string[] = []
+      const userId = `tmp-user-${Date.now()}`
+      pendingIds.push(userId)
+      state().appendChatMessage(agentId, { id: userId, role: 'user', content, timestamp: stamp() })
+
+      let currentId: string | null = null
+      let seq = 0
+      let thinking = ''
+      let result: SendResult = { messages: [], runId: '', threadId: '' }
+      let failure: ApiError | null = null
+      let finished = false
+      const toolBubbles = new Map<string, { id: string; name: string; args: string }>()
+
+      const openBubble = (): void => {
+        seq += 1
+        currentId = `tmp-assistant-${Date.now()}-${seq}`
+        pendingIds.push(currentId)
+        state().appendChatMessage(agentId, {
+          id: currentId, role: 'assistant', content: '', timestamp: stamp(), streaming: true,
+        })
+      }
+      const closeBubble = (): void => {
+        if (currentId) state().patchChatMessage(agentId, currentId, { streaming: false })
+        currentId = null
+      }
+
+      // 推理模型可能先输出数分钟思考流，整体超时必须覆盖智能体的 maxRunSeconds，
+      // 否则默认 chatTimeoutMs（150s）会在正式回答出现前把流掐断。
+      const maxRunSeconds = state().agents.find((item) => item.id === agentId)?.advanced.maxRunSeconds ?? 0
+      const timeoutMs = Math.max(limits().chatTimeoutMs || 150000, maxRunSeconds > 0 ? (maxRunSeconds + 30) * 1000 : 0)
+      const handle = await openEventStream(`/agents/${agentId}/test-runs`, {
+        method: 'POST',
+        headers: { Accept: 'text/event-stream' },
+        body: jsonBody({ content, testModelId: modelId }),
+        timeoutMs,
+      })
+
+      let streamError: unknown = null
+      try {
+        await readSse(handle.reader, ({ event, data }) => {
+          let payload: Record<string, unknown> = {}
+          if (data) {
+            try {
+              payload = JSON.parse(data) as Record<string, unknown>
+            } catch {
+              return
+            }
+          }
+          if (event === 'run.started') {
+            result = { ...result, runId: String(payload.runId ?? ''), threadId: String(payload.threadId ?? '') }
+          } else if (event === 'message.thinking') {
+            if (!currentId) openBubble()
+            const delta = String(payload.delta ?? '')
+            thinking += delta
+            if (currentId) state().appendChatThinking(agentId, currentId, delta)
+          } else if (event === 'message.start') {
+            if (!currentId) openBubble()
+          } else if (event === 'message.delta') {
+            if (!currentId) openBubble()
+            if (currentId) state().appendChatDelta(agentId, currentId, String(payload.delta ?? ''))
+          } else if (event === 'message.end') {
+            closeBubble()
+          } else if (event === 'tool.start') {
+            closeBubble()
+            const callId = String(payload.toolCallId ?? `seq-${seq}`)
+            const name = String(payload.name ?? '工具')
+            const args = JSON.stringify(payload.args ?? {}, null, 2)
+            const bubbleId = `tmp-tool-${callId}`
+            pendingIds.push(bubbleId)
+            toolBubbles.set(callId, { id: bubbleId, name, args })
+            state().appendChatMessage(agentId, {
+              id: bubbleId,
+              role: 'tool',
+              content: '',
+              timestamp: stamp(),
+              toolCall: { name, args, status: 'success', result: '执行中…' },
+            })
+          } else if (event === 'tool.result') {
+            const callId = String(payload.toolCallId ?? '')
+            const bubble = toolBubbles.get(callId)
+            if (bubble) {
+              state().patchChatMessage(agentId, bubble.id, {
+                toolCall: {
+                  name: bubble.name,
+                  args: bubble.args,
+                  status: payload.status === 'failed' ? 'failed' : 'success',
+                  result: String(payload.summary ?? ''),
+                },
+              })
+            }
+          } else if (event === 'run.finished') {
+            finished = true
+            closeBubble()
+            const messages = (payload.messages as ChatMessage[] | undefined) ?? []
+            if (thinking) {
+              for (let index = messages.length - 1; index >= 0; index -= 1) {
+                if (messages[index].role === 'assistant') {
+                  messages[index] = { ...messages[index], thinking }
+                  break
+                }
+              }
+            }
+            state().commitChatRun(agentId, pendingIds, messages)
+            syncLogs(payload.logs as LogEntry[] | undefined)
+            if (typeof payload.sessionCount === 'number') {
+              state().patchAgent(agentId, { sessionCount: payload.sessionCount })
+            }
+            result = {
+              messages,
+              runId: String(payload.runId ?? result.runId),
+              threadId: String(payload.threadId ?? result.threadId),
+            }
+            if (payload.finishReason === 'timeout') {
+              failure = new ApiError('run_timeout', '本次运行超过最大时长限制，已终止')
+            }
+          } else if (event === 'message.error') {
+            failure = new ApiError(String(payload.code ?? 'agent_run_failed'), String(payload.message ?? '运行失败'))
+          }
+        })
+      } catch (reason) {
+        streamError = reason
+      } finally {
+        handle.close()
+      }
+
+      if (!finished) closeBubble()
+      if (streamError) {
+        if (streamError instanceof ApiError) throw streamError
+        if (streamError instanceof DOMException && streamError.name === 'AbortError') {
+          throw new ApiError('upstream_timeout', '等待模型响应超时，请稍后重试')
+        }
+        throw new ApiError('stream_interrupted', '流式连接中断，请重试')
+      }
+      if (!finished) throw failure ?? new ApiError('stream_interrupted', '未收到完整运行结果，请重试')
+      if (failure) throw failure
+      return result
     },
     async clear(agentId: string): Promise<void> {
       await http<void>(`/agents/${agentId}/test-session`, { method: 'DELETE' })

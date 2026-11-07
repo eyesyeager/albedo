@@ -23,10 +23,13 @@ def blocked_ip(value: str) -> bool:
     ))
 
 
-async def assert_public_url(url: str) -> None:
+async def assert_public_url(url: str, *, allow_private: bool = False) -> None:
+    """SSRF 校验。allow_private 仅供 MCP 在管理员显式开启配置后放行本地/内网服务。"""
     parsed = urlparse(url.strip())
     if parsed.scheme not in ("http", "https") or not parsed.hostname:
         raise ApiException("validation_error", "URL 必须是合法的 HTTP(S) 地址", 400)
+    if allow_private:
+        return
     host = parsed.hostname.lower()
     if host in BLOCKED_HOSTS or host.endswith(".local") or host.endswith(".internal"):
         raise ApiException("validation_error", "该地址位于受限网络，已被 SSRF 防护拦截", 400)

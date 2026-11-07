@@ -1,4 +1,4 @@
-import { MoreHorizontal, Plug, Settings2 } from 'lucide-react'
+import { MoreHorizontal, Plug, Settings2, Trash2 } from 'lucide-react'
 import type { McpServer } from '../../types/domain'
 import { formatNumber, formatPercent } from '../../lib/format'
 import { Button, Badge } from '../../components/ui'
@@ -10,11 +10,11 @@ export const TRANSPORT_LABEL: Record<McpServer['transport'], string> = {
   stdio: 'stdio',
 }
 
-export function McpCard({ mcp, onConfig, onTools }: { mcp: McpServer; onConfig: () => void; onTools: () => void }) {
+export function McpCard({ mcp, onConfig, onTools, onDelete }: { mcp: McpServer; onConfig: () => void; onTools: () => void; onDelete?: () => void }) {
   const enabledTools = mcp.tools.filter((tool) => tool.enabled).length
 
   return (
-    <div className="card flex flex-col p-4 transition-all duration-200 hover:-translate-y-0.5 hover:shadow-pop">
+    <div className="card group relative flex flex-col p-4 transition-all duration-200 hover:-translate-y-0.5 hover:shadow-pop">
       <div className="flex items-start gap-3">
         <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-[11px] bg-blue-50 text-blue-600">
           <Plug className="h-4 w-4" aria-hidden />
@@ -29,9 +29,22 @@ export function McpCard({ mcp, onConfig, onTools }: { mcp: McpServer; onConfig: 
             <ConnectionBadge connection={mcp.enabled ? mcp.connection : 'untested'} />
           </div>
         </div>
-        <button type="button" aria-label={`查看 ${mcp.name} 工具管理`} title="工具管理" onClick={onTools} className="rounded-field p-1 text-ink-faint transition-colors hover:bg-canvas hover:text-ink">
-          <MoreHorizontal className="h-4 w-4" />
-        </button>
+        <div className="flex shrink-0 items-center gap-0.5">
+          {onDelete && (
+            <button
+              type="button"
+              aria-label={`删除 MCP ${mcp.name}`}
+              title="删除 MCP"
+              onClick={onDelete}
+              className="rounded-field p-1 text-ink-faint opacity-0 transition-all duration-200 hover:bg-danger/10 hover:text-danger focus-visible:opacity-100 group-hover:opacity-100"
+            >
+              <Trash2 className="h-3.5 w-3.5" />
+            </button>
+          )}
+          <button type="button" aria-label={`查看 ${mcp.name} 工具管理`} title="工具管理" onClick={onTools} className="rounded-field p-1 text-ink-faint transition-colors hover:bg-canvas hover:text-ink">
+            <MoreHorizontal className="h-4 w-4" />
+          </button>
+        </div>
       </div>
 
       <p className="mt-3 line-clamp-2 min-h-[36px] text-xs leading-relaxed text-ink-muted">{mcp.description}</p>

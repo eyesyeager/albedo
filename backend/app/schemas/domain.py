@@ -31,6 +31,7 @@ class McpServer(DomainModel):
     transport: McpTransport
     endpoint: str
     headers: str
+    env: str = ""
     timeoutSeconds: int
     qpm: int
     maxConcurrency: int

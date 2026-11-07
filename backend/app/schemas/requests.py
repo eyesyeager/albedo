@@ -98,6 +98,7 @@ class McpTestRequest(PatchModel):
     transport: Literal["sse", "streamable_http", "stdio"] = "streamable_http"
     endpoint: str = ""
     headers: str = ""
+    env: str = ""
     timeoutSeconds: int = 60
     tested: bool = False
 
@@ -117,6 +118,7 @@ class McpPatch(PatchModel):
     transport: Literal["sse", "streamable_http", "stdio"] | None = None
     endpoint: str | None = None
     headers: str | None = None
+    env: str | None = None
     timeoutSeconds: int | None = None
     qpm: int | None = None
     maxConcurrency: int | None = None

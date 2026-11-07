@@ -1,3 +1,5 @@
+import json
+
 import pytest
 from httpx import AsyncClient
 
@@ -97,6 +99,62 @@ async def test_test_run_persists_messages_and_logs(client: AsyncClient) -> None:
     assert cleared.json()["clearedThreads"] >= 2
     empty = await client.get("/api/v1/workspace/bootstrap")
     assert empty.json()["chatSessions"].get("agt-research", []) == []
+
+
+@pytest.mark.asyncio
+async def test_test_run_stream_emits_sse_and_persists(client: AsyncClient) -> None:
+    await login(client)
+    before = await client.get("/api/v1/workspace/bootstrap")
+    agent = next(item for item in before.json()["agents"] if item["id"] == "agt-research")
+    count_before = agent["sessionCount"]
+
+    async with client.stream(
+        "POST", "/api/v1/agents/agt-research/test-runs",
+        headers={"Accept": "text/event-stream"},
+        json={"content": "请用流式方式回答", "testModelId": "mdl-gpt", "threadId": "thd_pytest_stream"},
+    ) as response:
+        assert response.status_code == 200, response.text
+        assert response.headers["content-type"].startswith("text/event-stream")
+        raw = "".join([chunk async for chunk in response.aiter_text()])
+
+    events: list[tuple[str, dict]] = []
+    for frame in raw.split("\n\n"):
+        if not frame.strip():
+            continue
+        name = ""
+        data = ""
+        for line in frame.splitlines():
+            if line.startswith("event: "):
+                name = line[len("event: "):]
+            elif line.startswith("data: "):
+                data += line[len("data: "):]
+        events.append((name, json.loads(data) if data else {}))
+
+    kinds = [name for name, _ in events]
+    assert kinds[0] == "run.started"
+    assert "message.thinking" in kinds, "推理模型的 thinking 增量必须单独下发"
+    assert kinds.index("message.thinking") < kinds.index("message.start")
+    thinking_deltas = [data["delta"] for name, data in events if name == "message.thinking"]
+    assert thinking_deltas and all(delta == "先梳理问题。" for delta in thinking_deltas)
+    assert "message.start" in kinds
+    assert kinds.count("message.delta") >= 2, "流式必须逐片下发增量 token"
+    assert "run.finished" in kinds
+
+    finished = next(data for name, data in events if name == "run.finished")
+    assert finished["runId"].startswith("run_")
+    assert finished["threadId"] == "thd_pytest_stream"
+    assert finished["messages"][0]["role"] == "user"
+    assert finished["messages"][-1]["role"] == "assistant"
+    assert finished["sessionCount"] == count_before + 1
+    streamed_text = "".join(data["delta"] for name, data in events if name == "message.delta")
+    assert streamed_text == finished["messages"][-1]["content"]
+
+    after = await client.get("/api/v1/workspace/bootstrap")
+    assert any(
+        message["id"] == finished["messages"][-1]["id"]
+        for message in after.json()["chatSessions"]["agt-research"]
+    )
+    assert any(log["runId"] == finished["runId"] for log in after.json()["logs"])
 
 
 @pytest.mark.asyncio

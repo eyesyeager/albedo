@@ -20,7 +20,7 @@ export function defaultSystemConfig(): SystemConfig {
         advanced: { keepContext: true, autoRetry: true, outputThinkingSummary: false, maxToolCalls: 0, maxRunSeconds: 0 },
       },
       model: { type: 'chat', vendor: '', baseUrl: '', headers: '', timeoutSeconds: 0, enabled: true },
-      mcp: { transport: 'streamable_http', endpoint: '', description: '', headers: '', timeoutSeconds: 0, qpm: 0, maxConcurrency: 0 },
+      mcp: { transport: 'streamable_http', endpoint: '', description: '', headers: '', env: '', timeoutSeconds: 0, qpm: 0, maxConcurrency: 0 },
       publication: { temperature: 0, maxOutputTokens: 0, qpm: 0 },
       skill: { firstVersion: '', firstNote: '' },
     },

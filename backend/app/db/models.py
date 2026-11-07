@@ -140,6 +140,7 @@ class McpServer(Base):
     transport: Mapped[str] = mapped_column(String(24), default="streamable_http")
     endpoint: Mapped[str] = mapped_column(Text, default="")
     headers_enc: Mapped[str] = mapped_column(Text, default="")
+    env_enc: Mapped[str] = mapped_column(Text, default="")
     timeout_seconds: Mapped[int] = mapped_column(Integer, default=60)
     qpm: Mapped[int] = mapped_column(Integer, default=60)
     max_concurrency: Mapped[int] = mapped_column(Integer, default=5)

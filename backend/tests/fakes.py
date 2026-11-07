@@ -59,6 +59,10 @@ class DeterministicChatModel(BaseChatModel):
     async def _astream(self, messages: list, stop: list[str] | None = None, run_manager: Any = None, **kwargs: Any):
         if self.delay_seconds:
             await asyncio.sleep(self.delay_seconds)
+        # 模拟推理模型：正文之前先产出只带 reasoning_content 的增量。
+        yield ChatGenerationChunk(message=AIMessageChunk(
+            content="", additional_kwargs={"reasoning_content": "先梳理问题。"},
+        ))
         executed = sum(1 for message in messages if isinstance(message, ToolMessage))
         if executed < self.tool_rounds and self.tool_names:
             yield ChatGenerationChunk(message=AIMessageChunk(content="", tool_call_chunks=[{

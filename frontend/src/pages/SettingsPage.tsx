@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Database, Globe2, KeyRound, ShieldCheck, SlidersHorizontal } from 'lucide-react'
-import type { WorkspaceSettings } from '../types/domain'
+import type { SystemConfig, WorkspaceSettings } from '../types/domain'
 import { maskedAccessKey } from '../lib/mask'
 import { api } from '../lib/api'
 import { asError } from '../lib/errors'
@@ -28,6 +28,7 @@ export function SettingsPage() {
   const [changeKeyOpen, setChangeKeyOpen] = useState(false)
   const [busy, setBusy] = useState(false)
   const [limitValues, setLimitValues] = useState<Record<string, string>>({})
+  const [allowPrivateMcp, setAllowPrivateMcp] = useState(false)
 
   useEffect(() => {
     setForm(settings)
@@ -35,7 +36,21 @@ export function SettingsPage() {
 
   useEffect(() => {
     setLimitValues(Object.fromEntries(EDITABLE_LIMITS.map((item) => [item.key, String(config.limits[item.key] ?? '')])))
+    setAllowPrivateMcp(Boolean((config.limits as Record<string, unknown>).mcpAllowPrivateUrls))
   }, [config])
+
+  const savePrivateMcp = (checked: boolean) => {
+    setAllowPrivateMcp(checked)
+    setBusy(true)
+    api.settings
+      .updateConfigs({ limits: { ...config.limits, mcpAllowPrivateUrls: checked } as unknown as SystemConfig['limits'] })
+      .then(() => toast.success(checked ? '已允许接入本地/内网 MCP' : '已恢复 MCP 公网地址限制'))
+      .catch((reason: unknown) => {
+        setAllowPrivateMcp(!checked)
+        toast.error(asError(reason).message)
+      })
+      .finally(() => setBusy(false))
+  }
 
   const saveGeneral = () => {
     setBusy(true)
@@ -145,6 +160,13 @@ export function SettingsPage() {
                 />
               </Field>
             ))}
+          </div>
+          <div className="mt-4 flex items-center justify-between gap-4 rounded-field border border-line px-3 py-3">
+            <div>
+              <p className="text-xs font-medium text-ink">允许接入本地 / 内网 MCP</p>
+              <p className="mt-1 text-2xs text-ink-faint">默认关闭（SSRF 防护）；开启后可接入 127.0.0.1、局域网等自建 MCP 服务</p>
+            </div>
+            <Switch label="允许接入本地 / 内网 MCP" checked={allowPrivateMcp} onChange={savePrivateMcp} />
           </div>
           <div className="mt-4 flex items-start gap-2 rounded-field bg-brand-faint px-3 py-2.5 text-2xs leading-relaxed text-brand">
             <SlidersHorizontal className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden />

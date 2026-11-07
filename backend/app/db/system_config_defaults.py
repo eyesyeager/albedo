@@ -122,6 +122,7 @@ def default_system_config() -> dict[str, Any]:
                 "endpoint": "",
                 "description": "自定义 MCP 服务",
                 "headers": "",
+                "env": "",
                 "timeoutSeconds": 60,
                 "qpm": 60,
                 "maxConcurrency": 5,
@@ -148,8 +149,12 @@ def default_system_config() -> dict[str, Any]:
             "skillMaxFiles": 500,
             "skillMaxUncompressedBytes": 200 * 1024 * 1024,
             "skillMaxDepth": 6,
+            # 运行时向模型提供的 Skill 指令上限：过小会让长指令 Skill 半失效。
+            "skillInstructionMaxChars": 40000,
             "mcpTimeoutMin": 3,
             "mcpTimeoutMax": 600,
+            # 默认仍禁止内网/本地 MCP；管理员显式开启后才放行自建服务。
+            "mcpAllowPrivateUrls": False,
             "exportExpireDays": 7,
             "downloadSignTtlSeconds": 300,
             "eventTtlSeconds": 600,

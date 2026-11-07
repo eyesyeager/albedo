@@ -11,11 +11,13 @@ from app.core.errors import ApiException
 from app.core.security import new_id, now_iso
 from app.runtime.checkpointer import degrade_to_memory, get_checkpointer, is_checkpointer_error
 from app.runtime.live_model import build_live_model, invoke_with_retry, is_retryable, map_upstream_error
+from app.runtime.mcp_loader import invoke_mcp_tool
 from app.runtime.prompts import render_system_prompt
 from app.runtime.state import AgentState
 from app.runtime.tools import build_tools, collect_tool_specs
 from app.runtime.types import RuntimeRequest, RuntimeResult, ToolSpec
 from app.services.audit import make_log_entry
+from app.services.system_config import limit
 from app.services.tool_usage import record_in_new_session
 
 SOURCE_LABELS = {
@@ -101,12 +103,17 @@ class RuntimeEngine:
 
         collector = _Collector()
         checkpointer = await self._get_checkpointer()
+        mcp_servers = {
+            str(item["id"]): item
+            for item in (snapshot.get("resolvedMounts") or {}).get("mcp") or []
+        }
         graph = self._build_graph(
             model,
             tools,
             spec_by_name,
             collector,
             checkpointer,
+            mcp_servers=mcp_servers,
             auto_retry=bool(advanced.get("autoRetry", True)),
             streaming=streaming,
             run_id=request.run_id,
@@ -322,7 +329,12 @@ class RuntimeEngine:
                     kind = event.get("event")
                     data = event.get("data") or {}
                     if kind == "on_chat_model_stream":
-                        text = self._chunk_text(data.get("chunk"))
+                        chunk = data.get("chunk")
+                        reasoning = self._chunk_reasoning(chunk)
+                        if reasoning:
+                            produced = True
+                            yield {"type": "thinking_delta", "delta": reasoning}
+                        text = self._chunk_text(chunk)
                         if text:
                             produced = True
                             if not message_open:
@@ -414,6 +426,7 @@ class RuntimeEngine:
         collector: _Collector,
         checkpointer: Any,
         *,
+        mcp_servers: dict[str, dict] | None = None,
         auto_retry: bool,
         streaming: bool = False,
         run_id: str = "",
@@ -456,16 +469,29 @@ class RuntimeEngine:
                 spec = spec_by_name.get(tool_name)
                 started = time.perf_counter()
                 status = "success"
+                mcp_duration: int | None = None
                 if tool is None:
                     output = json.dumps({"status": "error", "message": "工具未注册"}, ensure_ascii=False)
                     status = "failed"
+                elif spec is not None and spec.kind == "mcp":
+                    server = dict((mcp_servers or {}).get(spec.resource_id) or {"id": spec.resource_id})
+                    outcome = await invoke_mcp_tool(server, tool, call.get("args") or {})
+                    status = str(outcome["status"])
+                    mcp_duration = int(outcome["durationMs"])
+                    output = (
+                        str(outcome["output"])
+                        if status == "success"
+                        else json.dumps({"status": "error", "message": outcome["error"]}, ensure_ascii=False)
+                    )
                 else:
+                    # 兜底超时，避免任何工具无限挂起整个 run。
+                    fallback_timeout = max(30.0, float(limit("chatTimeoutMs", 150000)) / 1000)
                     try:
-                        output = await tool.ainvoke(call.get("args") or {})
+                        output = await asyncio.wait_for(tool.ainvoke(call.get("args") or {}), timeout=fallback_timeout)
                     except Exception as exc:  # noqa: BLE001
                         output = json.dumps({"status": "error", "message": str(exc)[:200]}, ensure_ascii=False)
                         status = "failed"
-                duration_ms = int((time.perf_counter() - started) * 1000)
+                duration_ms = mcp_duration if mcp_duration is not None else int((time.perf_counter() - started) * 1000)
                 summary = self._summarize_result(output)
                 await record_in_new_session(
                     kind=spec.kind if spec else "tool",
@@ -548,6 +574,24 @@ class RuntimeEngine:
         for chunk in chunks[1:]:
             reply = reply + chunk
         return reply
+
+    @staticmethod
+    def _chunk_reasoning(chunk: Any) -> str:
+        """提取推理模型的思考增量，兼容 additional_kwargs 与结构化 content 块。"""
+        if chunk is None:
+            return ""
+        extra = getattr(chunk, "additional_kwargs", None) or {}
+        value = extra.get("reasoning_content") or extra.get("reasoning") or extra.get("thinking")
+        if isinstance(value, str):
+            return value
+        content = getattr(chunk, "content", None)
+        if isinstance(content, list):
+            return "".join(
+                str(block.get("text") or block.get("content") or "")
+                for block in content
+                if isinstance(block, dict) and block.get("type") in ("reasoning", "thinking", "reasoning_content")
+            )
+        return ""
 
     @staticmethod
     def _chunk_text(chunk: Any) -> str:

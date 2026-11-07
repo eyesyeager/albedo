@@ -40,6 +40,7 @@ export interface McpServer {
   transport: McpTransport
   endpoint: string
   headers: string
+  env: string
   timeoutSeconds: number
   qpm: number
   maxConcurrency: number
@@ -222,6 +223,10 @@ export interface ChatMessage {
   content: string
   timestamp: string
   toolCall?: ChatToolCall
+  /** 仅前端本地状态：该条消息仍在接收增量 token。 */
+  streaming?: boolean
+  /** 仅前端本地状态：推理模型下发的思考过程，不参与落库。 */
+  thinking?: string
 }
 
 export interface TrendPoint {
@@ -324,6 +329,7 @@ export interface SystemConfig {
       endpoint: string
       description: string
       headers: string
+      env: string
       timeoutSeconds: number
       qpm: number
       maxConcurrency: number
@@ -384,6 +390,7 @@ export interface McpDraft {
   transport: McpTransport
   endpoint: string
   headers: string
+  env: string
   timeoutSeconds: number
   tested: boolean
 }

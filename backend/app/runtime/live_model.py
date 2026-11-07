@@ -42,6 +42,33 @@ def map_upstream_error(exc: Exception) -> ApiException | None:
     return None
 
 
+class ReasoningChatOpenAI(ChatOpenAI):
+    """保留上游推理模型的思考增量。
+
+    langchain-openai 的 `_convert_delta_to_message_chunk` 只取 content / 工具调用，
+    会把 `delta.reasoning_content` 直接丢弃；思考型模型在正文前可能只发这类增量，
+    导致客户端长时间收不到任何可见内容。这里把原始字段透传到 additional_kwargs，
+    由 RuntimeEngine 以独立的 thinking 事件下发，不与正式回答混在一起。
+    """
+
+    def _convert_chunk_to_generation_chunk(
+        self,
+        chunk: dict,
+        default_chunk_class: type,
+        base_generation_info: dict | None,
+    ) -> Any:
+        generation = super()._convert_chunk_to_generation_chunk(chunk, default_chunk_class, base_generation_info)
+        if generation is None:
+            return None
+        choices = chunk.get("choices") or (chunk.get("chunk") or {}).get("choices") or []
+        if choices:
+            delta = choices[0].get("delta") or {}
+            reasoning = delta.get("reasoning_content") or delta.get("reasoning")
+            if reasoning:
+                generation.message.additional_kwargs["reasoning_content"] = reasoning
+        return generation
+
+
 def build_live_model(snapshot: dict, tool_names: list[str], rendered: str) -> ChatOpenAI:
     settings = get_settings()
     if not settings.llm_api_key or not settings.llm_model:
@@ -52,12 +79,22 @@ def build_live_model(snapshot: dict, tool_names: list[str], rendered: str) -> Ch
         )
     params: dict[str, Any] = snapshot.get("modelParams") or {}
     temperature = float(params.get("temperature", settings.llm_temperature))
-    return ChatOpenAI(
+    # 推理模型在正式回答前可能数分钟只输出 reasoning_content，甚至长时间没有首个 chunk。
+    # 若沿用全局 LLM_TIMEOUT_SECONDS（默认 120s），上游读超时会中断本轮流式请求，
+    # _stream_model 再从头重试，两三次重试就吃光 maxRunSeconds，客户端最终颗粒无收。
+    # 单次上游请求至少覆盖整轮运行时长，整体仍由 RuntimeEngine 的 maxRunSeconds 兜底。
+    advanced = snapshot.get("advanced") or {}
+    try:
+        run_seconds = float(advanced.get("maxRunSeconds") or 0)
+    except (TypeError, ValueError):
+        run_seconds = 0.0
+    timeout_seconds = max(float(settings.llm_timeout_seconds or 60), run_seconds, 1.0)
+    return ReasoningChatOpenAI(
         model=settings.llm_model,
         api_key=settings.llm_api_key,
         base_url=settings.llm_base_url or None,
         temperature=min(2.0, max(0.0, temperature)),
-        timeout=settings.llm_timeout_seconds,
+        timeout=timeout_seconds,
         max_retries=0,
     )
 

@@ -25,8 +25,9 @@ function RequireAuth({ children }: { children: ReactNode }) {
       .then((session) => {
         if (!cancelled && !session.authenticated) useAuth.getState().setAuthenticated(false)
       })
-      .catch(() => {
-        if (!cancelled) useAuth.getState().setAuthenticated(false)
+      .catch((error: unknown) => {
+        // 只有服务端明确返回未登录才跳转；网络抖动不应把页面踢回登录页。
+        if (!cancelled) console.warn('[albedo] 会话复核失败，保持当前登录态：', error)
       })
     return () => { cancelled = true }
   }, [authenticated])

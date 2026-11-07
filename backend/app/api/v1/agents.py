@@ -1,19 +1,23 @@
 import secrets
 import string
+from collections.abc import AsyncIterator
 from typing import Any
 
-from fastapi import APIRouter, Depends, Header
+from fastapi import APIRouter, Depends, Header, Request
+from fastapi.responses import StreamingResponse
 from sqlalchemy import delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import current_session
-from app.api.public.runtime import persist_failure
+from app.api.public.agents import sse
+from app.api.public.runtime import persist_failure, persist_failure_logs, persist_result
 from app.core.errors import ApiException
 from app.core.security import new_id, now_iso, suffix_of
 from app.db import models as m
 from app.db.seed import to_row
 from app.db.session import get_db
 from app.runtime import RuntimeRequest, get_runtime_engine
+from app.runtime.live_model import map_upstream_error
 from app.schemas.domain import Agent as AgentSchema
 from app.schemas.domain import HistoryResult, PublishCheckResult, SendResult
 from app.schemas.requests import AgentDraft, AgentPatch, ProtocolPatch, TestRunRequest
@@ -251,13 +255,12 @@ async def agent_history(
     return {"items": items, "total": len(items), "sources": sorted({row.source for row in rows})}
 
 
-@router.post("/agents/{agent_id}/test-runs", response_model=SendResult, summary="测试会话运行（LangGraph 真实模型与工具）")
-async def test_run(
+async def prepare_test_run(
+    db: AsyncSession,
     agent_id: str,
     payload: TestRunRequest,
-    db: AsyncSession = Depends(get_db),
-    _: m.Session = Depends(current_session),
-) -> dict:
+) -> tuple[m.Agent, RuntimeRequest, dict]:
+    """校验智能体与测试模型，冻结配置快照并组装运行请求（同步与流式接口共用）。"""
     agent = await get_or_404(db, m.Agent, agent_id)
     model = await db.get(m.ModelResource, payload.testModelId or agent.test_model_id or agent.default_model_id)
     if model is None or not model.enabled:
@@ -286,11 +289,145 @@ async def test_run(
         source="test_session",
         strict_variables=False,
     )
+    return agent, request, snapshot
+
+
+async def _persist_stream_run(
+    db: AsyncSession,
+    agent: m.Agent,
+    request: RuntimeRequest,
+    snapshot: dict,
+    event: dict[str, Any],
+) -> dict[str, Any]:
+    """流式运行结束后落库，并组装 run.finished 载荷。"""
+    result = event.get("result")
+    if result is not None:
+        await persist_result(db, agent, result, snapshot, "test_session")
+        return {
+            "runId": result.run_id,
+            "threadId": result.thread_id,
+            "messages": result.messages,
+            "logs": result.logs,
+            "finishReason": result.finish_reason,
+            "sessionCount": agent.session_count,
+        }
+    logs = list(event.get("logs") or [])
+    await persist_failure_logs(db, agent, request, logs, int(event.get("durationMs") or 0), snapshot)
+    return {
+        "runId": request.run_id,
+        "threadId": request.thread_id,
+        "messages": [],
+        "logs": logs,
+        "finishReason": "failed",
+        "sessionCount": agent.session_count,
+    }
+
+
+async def stream_test_run(
+    db: AsyncSession,
+    agent: m.Agent,
+    request: RuntimeRequest,
+    snapshot: dict,
+) -> AsyncIterator[str]:
+    """把引擎增量事件转成管理面 SSE：逐 token 下发，结束后统一落库。"""
+    message_id = ""
+    message_open = False
+    pending_error: dict[str, Any] | None = None
+    engine_events = get_runtime_engine().run_stream(request)
     try:
-        result = await get_runtime_engine().run(request)
+        async for event in engine_events:
+            kind = event.get("type")
+            if kind == "run_started":
+                yield sse("run.started", {
+                    "type": "run.started", "runId": request.run_id, "threadId": request.thread_id,
+                })
+            elif kind == "thinking_delta":
+                yield sse("message.thinking", {"type": "message.thinking", "delta": event.get("delta", "")})
+            elif kind == "message_start":
+                message_id = str(event.get("messageId") or new_id("msg-"))
+                message_open = True
+                yield sse("message.start", {
+                    "type": "message.start", "messageId": message_id, "role": "assistant",
+                })
+            elif kind == "token":
+                message_id = message_id or str(event.get("messageId") or new_id("msg-"))
+                yield sse("message.delta", {
+                    "type": "message.delta", "messageId": message_id, "delta": event.get("delta", ""),
+                })
+            elif kind == "message_end":
+                yield sse("message.end", {"type": "message.end", "messageId": message_id})
+                message_open = False
+                message_id = ""
+            elif kind == "tool_start":
+                yield sse("tool.start", {
+                    "type": "tool.start",
+                    "toolCallId": event.get("toolCallId", ""),
+                    "name": event.get("name", ""),
+                    "args": event.get("args") or {},
+                })
+            elif kind == "tool_result":
+                yield sse("tool.result", {
+                    "type": "tool.result",
+                    "toolCallId": event.get("toolCallId", ""),
+                    "status": event.get("status", "success"),
+                    "summary": event.get("summary", ""),
+                })
+            elif kind in ("run_finished", "run_error"):
+                payload = await _persist_stream_run(db, agent, request, snapshot, event)
+                yield sse("run.finished", {"type": "run.finished", **payload})
+                if kind == "run_error":
+                    pending_error = {
+                        "type": "message.error",
+                        "code": event.get("code", "agent_run_failed"),
+                        "message": event.get("message", "运行失败"),
+                    }
+    except Exception as exc:  # noqa: BLE001
+        mapped = map_upstream_error(exc)
+        pending_error = {
+            "type": "message.error",
+            "code": getattr(mapped, "code", None) or "agent_run_failed",
+            "message": getattr(mapped, "message", None) or str(exc)[:200],
+        }
+    finally:
+        # 客户端断开时及时终止上游运行，避免无人消费的 token 继续写入 checkpoint。
+        try:
+            await engine_events.aclose()
+        except Exception:  # noqa: BLE001
+            pass
+        # aclose 会注入 GeneratorExit，此时不能再向流里写帧。
+        try:
+            if message_open:
+                yield sse("message.end", {"type": "message.end", "messageId": message_id})
+            if pending_error is not None:
+                yield sse("message.error", pending_error)
+        except (GeneratorExit, RuntimeError):
+            pass
+
+
+@router.post(
+    "/agents/{agent_id}/test-runs",
+    response_model=SendResult,
+    summary="测试会话运行（LangGraph 真实模型与工具，Accept: text/event-stream 时流式）",
+)
+async def test_run(
+    agent_id: str,
+    payload: TestRunRequest,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    _: m.Session = Depends(current_session),
+) -> Any:
+    agent, runtime_request, snapshot = await prepare_test_run(db, agent_id, payload)
+    if "text/event-stream" in request.headers.get("accept", "").lower():
+        return StreamingResponse(
+            stream_test_run(db, agent, runtime_request, snapshot),
+            media_type="text/event-stream",
+            headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+        )
+    try:
+        result = await get_runtime_engine().run(runtime_request)
     except ApiException as exc:
         # 运行失败也要落审计日志，避免测试会话只看到 500、日志里查不到记录。
-        await persist_failure(db, agent, request, exc, snapshot)
+        await persist_failure(db, agent, runtime_request, exc, snapshot)
         raise
 
     for message in result.messages:

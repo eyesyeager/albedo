@@ -14,6 +14,7 @@ function emptyForm(config: SystemConfig): McpDraft {
     transport: defaults.transport,
     endpoint: defaults.endpoint,
     headers: defaults.headers,
+    env: defaults.env ?? '',
     timeoutSeconds: defaults.timeoutSeconds,
     tested: false,
   }
@@ -117,8 +118,12 @@ export function CreateMcpDialog({ open, onClose }: { open: boolean; onClose: () 
           <Textarea id="mcp-desc" rows={2} value={form.description} placeholder="描述这个服务提供的能力" onChange={(event) => update({ description: event.target.value })} />
         </Field>
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-          <Field label="自定义请求头" htmlFor="mcp-headers" hint="JSON 对象，敏感值不会出现在明文日志中">
-            <Textarea id="mcp-headers" rows={3} value={form.headers} className="font-mono text-xs" placeholder='{"Authorization":"Bearer …"}' onChange={(event) => update({ headers: event.target.value })} />
+          <Field label={form.transport === 'stdio' ? '环境变量（可选）' : '自定义请求头'} htmlFor="mcp-headers" hint={form.transport === 'stdio' ? 'stdio 子进程环境变量，JSON 对象，加密存储' : 'JSON 对象，敏感值不会出现在明文日志中'}>
+            {form.transport === 'stdio' ? (
+              <Textarea id="mcp-headers" rows={3} value={form.env} className="font-mono text-xs" placeholder='{"GITHUB_TOKEN":"…"}' onChange={(event) => update({ env: event.target.value })} />
+            ) : (
+              <Textarea id="mcp-headers" rows={3} value={form.headers} className="font-mono text-xs" placeholder='{"Authorization":"Bearer …"}' onChange={(event) => update({ headers: event.target.value })} />
+            )}
           </Field>
           <Field label="超时时间（秒）" htmlFor="mcp-timeout" hint={`范围 ${config.limits.mcpTimeoutMin || 3} ~ ${config.limits.mcpTimeoutMax || 600} 秒`}>
             <Input

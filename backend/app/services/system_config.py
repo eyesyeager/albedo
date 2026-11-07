@@ -40,7 +40,18 @@ async def all_configs(session: AsyncSession) -> dict[str, Any]:
     defaults = default_system_config()
     result = dict(defaults)
     for row in (await session.scalars(select(m.SystemConfig))).all():
-        if row.key in defaults:
+        if row.key not in defaults:
+            continue
+        # 分组配置浅合并：新增的默认项无需数据迁移即可生效，且保留库中的覆盖值。
+        if isinstance(defaults[row.key], dict) and isinstance(row.value, dict):
+            merged = {**defaults[row.key], **row.value}
+            if row.key == "defaults":
+                # defaults 下还有 agent/model/mcp 等子分组，需要再合并一层。
+                for sub_key, sub_default in defaults[row.key].items():
+                    if isinstance(sub_default, dict) and isinstance(merged.get(sub_key), dict):
+                        merged[sub_key] = {**sub_default, **merged[sub_key]}
+            result[row.key] = merged
+        else:
             result[row.key] = row.value
     return result
 

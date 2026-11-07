@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { AlertTriangle, CheckCircle2, Clock3, Play, Zap } from 'lucide-react'
+import { AlertTriangle, CheckCircle2, Clock3, Play, Trash2, Zap } from 'lucide-react'
 import { formatDateTime, formatDuration } from '../../lib/format'
 import { api } from '../../lib/api'
 import { asError } from '../../lib/errors'
@@ -13,13 +13,13 @@ import { McpToolTestDialog } from './McpToolTestDialog'
 
 export type McpTab = 'general' | 'tools' | 'usage' | 'calls'
 
-export function McpDetailDrawer({ mcpId, initialTab, onClose }: { mcpId: string | null; initialTab: McpTab; onClose: () => void }) {
+export function McpDetailDrawer({ mcpId, initialTab, onClose, onDelete }: { mcpId: string | null; initialTab: McpTab; onClose: () => void; onDelete: (id: string) => void }) {
   const navigate = useNavigate()
   const data = useWorkspace()
   const defaults = useWorkspace((state) => state.systemConfig.defaults.mcp)
   const mcp = data.mcps.find((item) => item.id === mcpId)
   const [tab, setTab] = useState<McpTab>(initialTab)
-  const [form, setForm] = useState({ name: '', description: '', endpoint: '', enabled: true })
+  const [form, setForm] = useState({ name: '', description: '', endpoint: '', env: '', enabled: true })
   const [qpm, setQpm] = useState(defaults.qpm)
   const [concurrency, setConcurrency] = useState(defaults.maxConcurrency)
   const [saving, setSaving] = useState(false)
@@ -33,7 +33,7 @@ export function McpDetailDrawer({ mcpId, initialTab, onClose }: { mcpId: string 
   useEffect(() => {
     const current = useWorkspace.getState().mcps.find((item) => item.id === mcpId)
     if (!current) return
-    setForm({ name: current.name, description: current.description, endpoint: current.endpoint, enabled: current.enabled })
+    setForm({ name: current.name, description: current.description, endpoint: current.endpoint, env: current.env ?? '', enabled: current.enabled })
     setQpm(current.qpm)
     setConcurrency(current.maxConcurrency)
   }, [mcpId])
@@ -51,7 +51,7 @@ export function McpDetailDrawer({ mcpId, initialTab, onClose }: { mcpId: string 
   const performSave = () => {
     setSaving(true)
     api.mcp
-      .update(mcp.id, { name: form.name, description: form.description, endpoint: form.endpoint })
+      .update(mcp.id, { name: form.name, description: form.description, endpoint: form.endpoint, env: form.env })
       .then(() => (form.enabled !== mcp.enabled ? api.mcp.toggle(mcp.id, form.enabled) : undefined))
       .then(() => {
         toast.success(form.enabled !== mcp.enabled ? `MCP 已${form.enabled ? '启用' : '停用'}，配置已保存` : 'MCP 配置已保存')
@@ -109,7 +109,17 @@ export function McpDetailDrawer({ mcpId, initialTab, onClose }: { mcpId: string 
       title={mcp.name}
       subtitle={`${TRANSPORT_LABEL[mcp.transport]} · ${mcp.endpoint}`}
       width="lg"
-      dirty={!confirmDisable && (form.name !== mcp.name || form.description !== mcp.description || form.endpoint !== mcp.endpoint || form.enabled !== mcp.enabled || qpm !== mcp.qpm || concurrency !== mcp.maxConcurrency)}
+      dirty={!confirmDisable && (form.name !== mcp.name || form.description !== mcp.description || form.endpoint !== mcp.endpoint || form.env !== (mcp.env ?? '') || form.enabled !== mcp.enabled || qpm !== mcp.qpm || concurrency !== mcp.maxConcurrency)}
+      footer={
+        <Button
+          variant="ghost"
+          className="mr-auto text-danger hover:bg-danger/10 hover:text-danger"
+          icon={<Trash2 className="h-3.5 w-3.5" />}
+          onClick={() => onDelete(mcp.id)}
+        >
+          删除 MCP
+        </Button>
+      }
     >
       <Tabs
         className="mb-5"
@@ -137,6 +147,11 @@ export function McpDetailDrawer({ mcpId, initialTab, onClose }: { mcpId: string 
           <Field label="连接类型" hint="创建后不可直接编辑；如需切换请新建服务并重新测试连接">
             <Select aria-label="连接类型" value={mcp.transport} disabled options={Object.entries(TRANSPORT_LABEL).map(([value, label]) => ({ value, label }))} />
           </Field>
+          {mcp.transport === 'stdio' && (
+            <Field label="环境变量" htmlFor="mcp-detail-env" hint="stdio 子进程环境变量，JSON 对象，加密存储">
+              <Textarea id="mcp-detail-env" rows={3} value={form.env} className="font-mono text-xs" placeholder='{"GITHUB_TOKEN":"…"}' onChange={(event) => setForm({ ...form, env: event.target.value })} />
+            </Field>
+          )}
           <div className="rounded-field border border-line px-3 py-3">
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0">

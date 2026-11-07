@@ -4,6 +4,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.db import models as m
 from app.services.agent_rules import load_mounts
 from app.services.common import agent_to_dict, model_to_dict, read_headers
+from app.services.system_config import get_configs
 
 
 async def build_runtime_snapshot(session: AsyncSession, agent: m.Agent, model: m.ModelResource) -> dict:
@@ -33,6 +34,10 @@ async def build_runtime_snapshot(session: AsyncSession, agent: m.Agent, model: m
             "transport": server.transport,
             "endpoint": server.endpoint,
             "headers": read_headers(server.headers_enc),
+            "env": read_headers(server.env_enc),
+            "timeoutSeconds": server.timeout_seconds,
+            "qpm": server.qpm,
+            "maxConcurrency": server.max_concurrency,
             "tools": [
                 {"name": tool.name, "key": tool.key, "description": tool.description, "enabled": tool.enabled}
                 for tool in tools
@@ -51,6 +56,11 @@ async def build_runtime_snapshot(session: AsyncSession, agent: m.Agent, model: m
             "enabled": tool.enabled,
         })
 
+    skill_instruction_limit = 0
+    if mounts["skillIds"]:
+        skill_instruction_limit = int(
+            (await get_configs(session))["limits"].get("skillInstructionMaxChars", 40000)
+        )
     for skill_id in mounts["skillIds"]:
         skill = await session.get(m.Skill, skill_id)
         if skill is None:
@@ -60,6 +70,7 @@ async def build_runtime_snapshot(session: AsyncSession, agent: m.Agent, model: m
             "name": skill.name,
             "description": skill.description,
             "instructions": skill.instructions,
+            "instructionLimit": skill_instruction_limit,
             "version": skill.version,
         })
 

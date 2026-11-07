@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type KeyboardEvent } from 'react'
-import { CheckCircle2, Send, Trash2, Wrench } from 'lucide-react'
+import { CheckCircle2, ChevronDown, Send, Trash2, Wrench } from 'lucide-react'
 import type { Agent, ChatMessage } from '../../types/domain'
 import { cn } from '../../lib/cn'
 import { formatTime } from '../../lib/format'
@@ -27,6 +27,37 @@ function ToolMessage({ message }: { message: ChatMessage }) {
   )
 }
 
+function ThinkingBlock({ text, streaming }: { text: string; streaming: boolean }) {
+  const [open, setOpen] = useState(streaming)
+  const textRef = useRef<HTMLPreElement>(null)
+  useEffect(() => {
+    if (!streaming) setOpen(false)
+  }, [streaming])
+  useEffect(() => {
+    // 思考文本增长时让块内滚动条也跟随到底，否则外层到底也看不到最新思考。
+    if (streaming && open && textRef.current) {
+      textRef.current.scrollTop = textRef.current.scrollHeight
+    }
+  }, [text, streaming, open])
+  return (
+    <div className="mb-2 rounded-field border border-line bg-white/60 px-2 py-1.5">
+      <button
+        type="button"
+        onClick={() => setOpen(!open)}
+        className="flex w-full items-center gap-1 text-[10px] text-ink-faint transition-colors hover:text-ink-muted"
+      >
+        <ChevronDown className={cn('h-3 w-3 transition-transform', open ? '' : '-rotate-90')} aria-hidden />
+        {streaming ? '正在思考…（实时）' : `思考过程（${text.length} 字）`}
+      </button>
+      {open && (
+        <pre ref={textRef} className="scroll-thin mt-1.5 max-h-40 overflow-auto whitespace-pre-wrap font-sans text-[11px] leading-relaxed text-ink-muted">
+          {text}
+        </pre>
+      )}
+    </div>
+  )
+}
+
 export function TestChatPanel({ agentId, draft, focusSignal, testModelId, onTestModelChange }: { agentId: string; draft: Agent; focusSignal: number; testModelId: string; onTestModelChange: (id: string) => void }) {
   const chatSessions = useWorkspace((state) => state.chatSessions)
   const models = useWorkspace((state) => state.models)
@@ -39,9 +70,14 @@ export function TestChatPanel({ agentId, draft, focusSignal, testModelId, onTest
   const testOptions = models.filter((model) => model.enabled && model.type === 'chat' && model.connection === 'normal')
     .map((model) => ({ value: model.id, label: model.name }))
 
+  const streamingMessage = messages.find((message) => message.streaming)
+
   useEffect(() => {
-    scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' })
-  }, [messages.length, sending])
+    // 每次增量（thinking / 正文 / 工具消息）都会生成新的 messages 数组，
+    // 因此用数组引用作为依赖，保证流式阶段滚动条始终停在最新输出处。
+    const container = scrollRef.current
+    if (container) container.scrollTop = container.scrollHeight
+  }, [messages, sending])
 
   useEffect(() => {
     if (focusSignal > 0) inputRef.current?.focus()
@@ -53,7 +89,7 @@ export function TestChatPanel({ agentId, draft, focusSignal, testModelId, onTest
     setInput('')
     setSending(true)
     api.chat
-      .send(agentId, content, testModelId)
+      .stream(agentId, content, testModelId)
       .then((result) => toast.info(`测试运行完成 · ${result.runId}`))
       .catch((reason: unknown) => {
         const message = asError(reason).message
@@ -107,13 +143,19 @@ export function TestChatPanel({ agentId, draft, focusSignal, testModelId, onTest
                 'max-w-[92%] rounded-card px-3 py-2.5 text-xs leading-relaxed',
                 message.role === 'user' ? 'bg-brand text-white' : 'border border-line bg-white text-ink shadow-card',
               )}>
-                <p className="whitespace-pre-wrap">{message.content}</p>
+                {message.role === 'assistant' && message.thinking && (
+                  <ThinkingBlock text={message.thinking} streaming={!!message.streaming} />
+                )}
+                <p className="whitespace-pre-wrap">
+                  {message.content}
+                  {message.streaming && <span className="ml-0.5 inline-block h-3 w-1.5 translate-y-0.5 animate-pulse rounded-sm bg-brand" aria-hidden />}
+                </p>
               </div>
             )}
             <span className="px-1 text-[10px] tabular-nums text-ink-faint">{formatTime(message.timestamp)}</span>
           </div>
         ))}
-        {sending && (
+        {sending && !streamingMessage && (
           <div className="flex items-center gap-1.5 rounded-card border border-line bg-white px-3 py-3 shadow-card" aria-label="正在生成回复">
             {[0, 150, 300].map((delay) => (
               <span key={delay} className="h-1.5 w-1.5 rounded-full bg-brand animate-breathe" style={{ animationDelay: `${delay}ms` }} />

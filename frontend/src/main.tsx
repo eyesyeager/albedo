@@ -31,9 +31,17 @@ async function start(): Promise<void> {
   try {
     const session = await fetchSession()
     useAuth.getState().setAuthenticated(session.authenticated)
-    if (session.authenticated) await replaceFromServer()
-  } catch {
+  } catch (error) {
+    console.error('[albedo] 会话校验失败：', error)
     useAuth.getState().setAuthenticated(false)
+  }
+  if (useAuth.getState().authenticated) {
+    try {
+      await replaceFromServer()
+    } catch (error) {
+      // 数据快照加载失败不等于会话失效，保留已确认的登录态，避免误跳登录页。
+      console.error('[albedo] 工作区数据加载失败：', error)
+    }
   }
   root.render(<AppTree />)
 }
