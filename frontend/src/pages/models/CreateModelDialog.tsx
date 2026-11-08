@@ -125,7 +125,7 @@ export function CreateModelDialog({ open, onClose }: { open: boolean; onClose: (
         </Field>
 
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-          <Field label="API Key" htmlFor="model-key" required hint="加密存储，保存后仅保留脱敏后缀">
+          <Field label="API Key" htmlFor="model-key" required hint="加密存储，保存后默认脱敏，可在模型详情中查看完整值">
             <Input
               id="model-key"
               type={keyVisible ? 'text' : 'password'}

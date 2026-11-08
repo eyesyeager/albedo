@@ -9,6 +9,7 @@ import { publishChecks } from '../../store/selectors'
 import { useWorkspace } from '../../store/workspace'
 import { Badge, Button, CopyButton, Modal, Switch, toast } from '../../components/ui'
 import { SectionCard } from '../../components/common/PageHeader'
+import { RevealCredentialButton } from '../../components/common/RevealCredentialButton'
 import { QuickStartCard } from './QuickStartCard'
 import { ApiDocCard } from './ApiDocCard'
 
@@ -125,11 +126,15 @@ export function PublishTab({ agentId, dirty }: { agentId: string; dirty: boolean
               <KeyRound className="h-3.5 w-3.5 text-brand" aria-hidden />
               <code className="min-w-0 flex-1 truncate font-mono text-xs text-ink">{maskedAgentToken(agent.credentialSuffix)}</code>
               <CopyButton value={agent.credentialSuffix} label="复制后缀" message="Key 后缀已复制" />
+              <RevealCredentialButton
+                reveal={() => api.agents.revealCredential(agentId)}
+                title="查看智能体访问凭证"
+              />
               <Button variant="outline" size="sm" icon={<RefreshCw className="h-3 w-3" />} disabled={busy} onClick={resetCredential}>重置密钥</Button>
             </div>
             <p className="mt-2.5 flex items-start gap-1.5 text-2xs leading-relaxed text-ink-faint">
               <ShieldCheck className="mt-0.5 h-3 w-3 shrink-0 text-ok" />
-              完整密钥仅在重置时展示一次，请妥善保存；示例代码从环境变量读取密钥，日志不记录明文。
+              完整密钥可在管理系统中随时查看，查看操作计入审计日志；示例代码从环境变量读取密钥，日志不记录明文。
             </p>
           </SectionCard>
 
@@ -163,7 +168,7 @@ export function PublishTab({ agentId, dirty }: { agentId: string; dirty: boolean
         open={oneTimeKey !== null}
         onClose={() => setOneTimeKey(null)}
         title="新的 Agent 访问凭证"
-        description="完整密钥仅展示这一次，关闭后不可再次查看"
+        description="新凭证已生效，也可在访问凭证卡片中随时再次查看"
         width="md"
         footer={<Button onClick={() => setOneTimeKey(null)} icon={<ArrowRight className="h-3.5 w-3.5" />}>我已保存</Button>}
       >

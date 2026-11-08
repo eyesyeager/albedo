@@ -151,6 +151,34 @@ async def store_credential(
     existing.rotated_at = stamp
 
 
+async def reveal_credential(
+    session: AsyncSession,
+    kind: str,
+    resource_id: str,
+    label: str,
+) -> dict[str, Any]:
+    """按需解密并返回完整凭证；只写审计日志，明文不进入 bootstrap / 常规资源响应。"""
+    credential = await session.scalar(
+        select(m.Credential).where(m.Credential.type == kind, m.Credential.resource_id == resource_id)
+    )
+    if credential is None or not credential.cipher:
+        raise ApiException("credential_not_found", "未找到该资源的访问凭证，请重新创建或重置密钥", 404)
+    full_key = decrypt_secret(credential.cipher)
+    if not full_key:
+        raise ApiException("credential_unreadable", "凭证解密失败，请检查 SECRET_KEY 配置后重试", 500)
+    await audit(
+        session, f"查看{label}",
+        f"查看了 {resource_id} 的{label}完整值（后缀 {credential.suffix}）",
+        resource_id=resource_id,
+    )
+    await session.commit()
+    return {
+        "fullKey": full_key,
+        "credentialSuffix": credential.suffix,
+        "rotatedAt": credential.rotated_at,
+    }
+
+
 async def agent_to_dict(session: AsyncSession, row: m.Agent) -> dict[str, Any]:
     mount_rows = (await session.scalars(select(m.AgentMount).where(m.AgentMount.agent_id == row.id))).all()
     keys = {"mcp": "mcpIds", "skill": "skillIds", "tool": "toolIds", "model": "modelIds"}

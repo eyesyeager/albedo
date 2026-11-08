@@ -410,6 +410,48 @@
         }
       }
     },
+    "/api/v1/models/{model_id}/credential": {
+      "get": {
+        "tags": [
+          "models"
+        ],
+        "summary": "查看模型上游 API Key",
+        "operationId": "reveal_model_credential_api_v1_models__model_id__credential_get",
+        "parameters": [
+          {
+            "name": "model_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Model Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CredentialView"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/models/{model_id}/enabled": {
       "patch": {
         "tags": [
@@ -1602,6 +1644,48 @@
         }
       }
     },
+    "/api/v1/agents/{agent_id}/credential": {
+      "get": {
+        "tags": [
+          "agents"
+        ],
+        "summary": "查看智能体访问凭证",
+        "operationId": "reveal_agent_credential_api_v1_agents__agent_id__credential_get",
+        "parameters": [
+          {
+            "name": "agent_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Agent Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CredentialView"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/agents/{agent_id}/publish-check": {
       "post": {
         "tags": [
@@ -1955,6 +2039,48 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/WriteResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/publications/{publication_id}/credential": {
+      "get": {
+        "tags": [
+          "publications"
+        ],
+        "summary": "查看发布版本 API Key",
+        "operationId": "reveal_publication_credential_api_v1_publications__publication_id__credential_get",
+        "parameters": [
+          {
+            "name": "publication_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Publication Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CredentialView"
                 }
               }
             }
@@ -3609,6 +3735,29 @@
           "plane"
         ],
         "title": "ContractInfo"
+      },
+      "CredentialView": {
+        "properties": {
+          "fullKey": {
+            "type": "string",
+            "title": "Fullkey"
+          },
+          "credentialSuffix": {
+            "type": "string",
+            "title": "Credentialsuffix"
+          },
+          "rotatedAt": {
+            "type": "string",
+            "title": "Rotatedat",
+            "default": ""
+          }
+        },
+        "type": "object",
+        "required": [
+          "fullKey",
+          "credentialSuffix"
+        ],
+        "title": "CredentialView"
       },
       "EnabledPatch": {
         "properties": {

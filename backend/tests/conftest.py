@@ -16,6 +16,19 @@ from fakes import build_test_model
 
 
 @pytest.fixture(autouse=True)
+def isolate_skill_storage(monkeypatch, tmp_path):
+    """测试期间强制 Skill 包落本地临时目录，避免误写真实 COS bucket。"""
+    from app.services.skill_storage import reset_skill_storage
+
+    settings = get_settings()
+    monkeypatch.setattr(settings, "skill_storage", "local")
+    monkeypatch.setattr(settings, "skill_dir", str(tmp_path / "skills"))
+    reset_skill_storage()
+    yield
+    reset_skill_storage()
+
+
+@pytest.fixture(autouse=True)
 def deterministic_runtime_engine(monkeypatch):
     """集成测试用确定性对话模型驱动 LangGraph，避免依赖外网 LLM。
 

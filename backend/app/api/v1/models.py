@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Response
 from sqlalchemy import delete, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -11,7 +11,7 @@ from app.db.seed import to_row
 from app.db.session import get_db
 from app.schemas.domain import ModelResource, TestConnectionResult
 from app.schemas.requests import EnabledPatch, ModelDraft, ModelPatch, ModelTestRequest
-from app.schemas.responses import WriteResponse
+from app.schemas.responses import CredentialView, WriteResponse
 from app.services.audit import audit
 from app.services.system_config import get_configs
 from app.services.common import (
@@ -19,6 +19,7 @@ from app.services.common import (
     get_or_404,
     model_to_dict,
     read_headers,
+    reveal_credential,
     store_credential,
     validate_blank,
     validate_json_object,
@@ -142,6 +143,18 @@ async def get_model(
     _: m.Session = Depends(current_session),
 ) -> dict:
     return model_to_dict(await get_or_404(db, m.ModelResource, model_id))
+
+
+@router.get("/models/{model_id}/credential", response_model=CredentialView, summary="查看模型上游 API Key")
+async def reveal_model_credential(
+    model_id: str,
+    response: Response,
+    db: AsyncSession = Depends(get_db),
+    _: m.Session = Depends(current_session),
+) -> dict:
+    await get_or_404(db, m.ModelResource, model_id)
+    response.headers["Cache-Control"] = "no-store"
+    return await reveal_credential(db, "upstream_model_key", model_id, "模型上游 API Key")
 
 
 @router.patch("/models/{model_id}", response_model=WriteResponse, summary="保存模型配置")

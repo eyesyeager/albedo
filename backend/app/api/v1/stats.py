@@ -7,7 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.deps import current_session
 from app.db import models as m
 from app.db.session import get_db
-from app.schemas.domain import OverviewStats, SearchResult, TrendPoint
+from app.schemas.domain import OverviewStats, SearchResult, TrendPoint, normalize_log_type
 from app.services.system_config import get_configs
 from app.services.trends import build_trend_points, local_date
 
@@ -37,7 +37,10 @@ async def overview(
     yesterday_calls = sum(1 for log in logs if local_date(log.timestamp) == yesterday)
 
     grouped = (await db.execute(select(m.LogEntry.type, func.count()).group_by(m.LogEntry.type))).all()
-    type_counts = {row[0]: int(row[1]) for row in grouped}
+    type_counts: dict[str, int] = {}
+    for raw_type, count in grouped:
+        canonical = normalize_log_type(raw_type)
+        type_counts[canonical] = type_counts.get(canonical, 0) + int(count)
 
     abnormal = sum(1 for model in models if model.enabled and model.connection != "normal")
     abnormal += sum(1 for mcp in mcps if mcp.enabled and mcp.connection != "normal")

@@ -64,6 +64,7 @@ npm install && npm run dev  # http://localhost:5173，/api 与 /v1 已代理至 
 - 鉴权：按 Key 后缀筛选 + Argon2 校验；跨 Agent 访问返回 `agent_access_denied`，未发布返回 `agent_not_published`。
 - 配额：固定窗口（窗口长度来自系统配置，Redis 降级进程内计数），超限 `rate_limit_exceeded`。
 - 上游凭证取 `upstream_model_key`（不是发布 Key）；禁止覆盖 `Host`/`Content-Length` 等 Header；上游错误统一映射。
+- 模型上游 Key、发布版本 Key、Agent Token 可通过 `GET /api/v1/{models,agents,publications}/:id/credential` 按需解密查看：需登录态、响应 `no-store`、写入系统操作日志；bootstrap 与常规资源读接口仍只返回 `credentialSuffix`。
 
 ## 安全加固
 

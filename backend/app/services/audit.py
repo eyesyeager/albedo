@@ -6,6 +6,7 @@ from app.core.logging import sanitize
 from app.core.security import new_id, now_iso
 from app.db import models as m
 from app.db.seed import to_row
+from app.schemas.domain import normalize_log_type
 from app.services.notify import notify
 
 
@@ -33,6 +34,9 @@ def make_log_entry(
         "durationMs": duration_ms,
     }
     entry.update({key: sanitize(value) for key, value in extra.items()})
+    # 工具 spec.kind（如 skill_resource / skill_script）不是合法的日志类型，
+    # 统一在此收口，保证任何写入 log_entries 的 type 都能通过响应模型校验。
+    entry["type"] = normalize_log_type(entry.get("type"), default="system")
     return entry
 
 

@@ -1,4 +1,4 @@
-from typing import Any, Literal
+from typing import Any, Literal, cast, get_args
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -9,6 +9,29 @@ McpTransport = Literal["sse", "streamable_http", "stdio"]
 LogType = Literal["session", "mcp", "skill", "tool", "model", "system"]
 LogStatus = Literal["running", "success", "failed", "timeout"]
 LogSource = Literal["test_session", "standard_api", "agui", "model_api", "system"]
+
+LOG_TYPES: tuple[str, ...] = get_args(LogType)
+# 运行时工具 spec.kind 比日志类型更细化；L3 的读取/执行都归入 Skill 类日志，
+# 分层级别、动作与资源路径由 skill_load_records 与日志 name/summary 保留。
+LOG_TYPE_ALIASES: dict[str, LogType] = {
+    "skill_resource": "skill",
+    "skill_script": "skill",
+}
+
+
+def normalize_log_type(value: str | None, *, default: LogType = "tool") -> LogType:
+    """把工具 kind 或历史脏数据归一到响应模型允许的日志类型，避免整页日志 500。"""
+    if value in LOG_TYPES:
+        return cast(LogType, value)
+    return LOG_TYPE_ALIASES.get(value or "", default)
+
+
+def log_type_values(value: str) -> tuple[str, ...]:
+    """筛选时同时匹配规范类型与历史别名，保证旧日志仍可被对应 Tab 查到。"""
+    canonical = LOG_TYPE_ALIASES.get(value) or (value if value in LOG_TYPES else None)
+    if canonical is None:
+        return (value,)
+    return (canonical, *(raw for raw, mapped in LOG_TYPE_ALIASES.items() if mapped == canonical))
 
 
 class DomainModel(BaseModel):

@@ -5,6 +5,7 @@ import type {
   AgentHistory,
   BuiltinTool,
   ChatMessage,
+  CredentialView,
   ExportTask,
   LogEntry,
   McpDiscoveryResult,
@@ -133,6 +134,9 @@ export const api = {
       if (!response.fullKey) throw new Error('后端未返回完整凭证，请重试')
       return response.fullKey
     },
+    async revealCredential(id: string): Promise<CredentialView> {
+      return await http<CredentialView>(`/agents/${encodeURIComponent(id)}/credential`)
+    },
     async setProtocol(id: string, protocol: 'api' | 'agui', enabled: boolean): Promise<void> {
       const response = await patch<WriteResponse<Agent>>(`/agents/${id}/protocols`, { protocol, enabled })
       if (response.entity) state().upsertAgent(response.entity)
@@ -170,6 +174,12 @@ export const api = {
       const response = await patch<WriteResponse<ModelResource>>(`/models/${id}`, changes)
       if (response.entity) state().upsertModel(response.entity)
       syncLog(response.log)
+    },
+    async revealCredential(id: string): Promise<CredentialView> {
+      return await http<CredentialView>(`/models/${encodeURIComponent(id)}/credential`)
+    },
+    async revealPublicationKey(id: string): Promise<CredentialView> {
+      return await http<CredentialView>(`/publications/${encodeURIComponent(id)}/credential`)
     },
     async toggle(id: string, enabled: boolean): Promise<void> {
       const response = await patch<WriteResponse<ModelResource>>(`/models/${id}/enabled`, { enabled })

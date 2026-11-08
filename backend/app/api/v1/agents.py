@@ -3,7 +3,7 @@ import string
 from collections.abc import AsyncIterator
 from typing import Any
 
-from fastapi import APIRouter, Depends, Header, Request
+from fastapi import APIRouter, Depends, Header, Request, Response
 from fastapi.responses import StreamingResponse
 from sqlalchemy import delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -21,9 +21,9 @@ from app.runtime.live_model import map_upstream_error
 from app.schemas.domain import Agent as AgentSchema
 from app.schemas.domain import HistoryResult, PublishCheckResult, SendResult
 from app.schemas.requests import AgentDraft, AgentPatch, ProtocolPatch, TestRunRequest
-from app.schemas.responses import WriteResponse
+from app.schemas.responses import CredentialView, WriteResponse
 from app.services.agent_rules import extract_variables, publish_issues, replace_mounts, validate_variables
-from app.services.common import agent_to_dict, commit_write, get_or_404, store_credential, validate_name
+from app.services.common import agent_to_dict, commit_write, get_or_404, reveal_credential, store_credential, validate_name
 from app.services.runtime_snapshot import build_runtime_snapshot
 from app.services.snapshot import row_dict
 from app.services.system_config import get_configs
@@ -105,6 +105,18 @@ async def get_agent(
     _: m.Session = Depends(current_session),
 ) -> dict:
     return await agent_to_dict(db, await get_or_404(db, m.Agent, agent_id))
+
+
+@router.get("/agents/{agent_id}/credential", response_model=CredentialView, summary="查看智能体访问凭证")
+async def reveal_agent_credential(
+    agent_id: str,
+    response: Response,
+    db: AsyncSession = Depends(get_db),
+    _: m.Session = Depends(current_session),
+) -> dict:
+    await get_or_404(db, m.Agent, agent_id)
+    response.headers["Cache-Control"] = "no-store"
+    return await reveal_credential(db, "agent_token", agent_id, "智能体访问凭证")
 
 
 @router.patch("/agents/{agent_id}", response_model=WriteResponse, summary="保存智能体配置（乐观锁）")

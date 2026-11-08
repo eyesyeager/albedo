@@ -62,7 +62,7 @@ class FakeCosClient:
 def fake_settings(root: Path) -> SimpleNamespace:
     return SimpleNamespace(
         cos_bucket="albedo-1305182252",
-        cos_region="ap-guangzhou",
+        cos_region="ap-nanjing",
         cos_secret_id="fake-id",
         cos_secret_key="fake-key",
         cos_token="",

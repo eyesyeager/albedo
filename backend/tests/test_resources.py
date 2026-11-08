@@ -1,4 +1,5 @@
 import io
+import json
 import zipfile
 from pathlib import Path
 
@@ -51,6 +52,18 @@ async def test_model_crud_and_real_connection(client: AsyncClient) -> None:
 
     stored = await client.get(f"/api/v1/models/{entity['id']}")
     assert stored.json()["credentialSuffix"] == "7890"
+    assert "fullKey" not in stored.json()
+
+    revealed = await client.get(f"/api/v1/models/{entity['id']}/credential")
+    assert revealed.status_code == 200, revealed.text
+    assert revealed.json()["fullKey"] == draft["apiKey"]
+    assert revealed.json()["credentialSuffix"] == "7890"
+    assert revealed.headers["cache-control"] == "no-store"
+
+    logs = await client.get("/api/v1/logs", params={"keyword": "查看模型上游 API Key", "range": "1y"})
+    assert logs.status_code == 200
+    assert logs.json()["items"], "查看凭证必须写入系统操作日志"
+    assert draft["apiKey"] not in json.dumps(logs.json(), ensure_ascii=False)
 
     retested = await client.post(f"/api/v1/models/{entity['id']}/test")
     assert retested.status_code == 200, retested.text
@@ -61,6 +74,10 @@ async def test_model_crud_and_real_connection(client: AsyncClient) -> None:
     assert deleted.status_code == 200, deleted.text
     gone = await client.get(f"/api/v1/models/{entity['id']}")
     assert gone.status_code == 404
+
+    client.cookies.clear()
+    denied = await client.get(f"/api/v1/models/{entity['id']}/credential")
+    assert denied.status_code == 401
 
 
 @pytest.mark.asyncio

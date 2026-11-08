@@ -1,7 +1,13 @@
 import pytest
 from httpx import AsyncClient
+from sqlalchemy import delete
 
 from app.core.config import get_settings
+from app.core.security import now_iso
+from app.db import models as m
+from app.db.session import SessionLocal
+from app.schemas.domain import log_type_values, normalize_log_type
+from app.services.audit import make_log_entry
 
 DEMO_KEY = get_settings().demo_access_key
 
@@ -131,3 +137,77 @@ async def test_system_configs_are_persisted(client: AsyncClient) -> None:
 
     removed = await client.post("/api/v1/settings/reset-demo")
     assert removed.status_code in (404, 405)
+
+
+def test_skill_l3_kinds_are_normalized_at_write_time() -> None:
+    """运行时工具 kind 不得击穿 LogType 枚举（P0 回归）。"""
+    assert normalize_log_type("skill_resource") == "skill"
+    assert normalize_log_type("skill_script") == "skill"
+    assert normalize_log_type("mcp") == "mcp"
+    assert normalize_log_type("unknown-kind") == "tool"
+    assert normalize_log_type(None, default="system") == "system"
+    assert set(log_type_values("skill")) == {"skill", "skill_resource", "skill_script"}
+    assert log_type_values("mcp") == ("mcp",)
+    assert make_log_entry("读取 Skill 资源", "L3", log_type="skill_resource")["type"] == "skill"
+    assert make_log_entry("执行 Skill 脚本", "L3", log_type="skill_script")["type"] == "skill"
+
+
+@pytest.mark.asyncio
+async def test_legacy_skill_l3_log_keeps_all_read_paths_healthy(client: AsyncClient) -> None:
+    """历史越界日志不得让日志页、执行链路、快照、概览返回 500（P0 回归）。"""
+    await login(client)
+    log_id = "log-regression-skill-l3"
+    run_id = "run-regression-skill-l3"
+
+    async def remove() -> None:
+        async with SessionLocal() as session:
+            await session.execute(delete(m.LogEntry).where(m.LogEntry.log_id == log_id))
+            await session.commit()
+
+    await remove()
+    async with SessionLocal() as session:
+        session.add(m.LogEntry(
+            log_id=log_id,
+            timestamp=now_iso(),
+            type="skill_resource",
+            status="success",
+            source="test_session",
+            name="回归 Skill L3 日志",
+            summary="模拟修复前写入的越界类型",
+            run_id=run_id,
+            thread_id="thd-regression-skill-l3",
+            agent_id="agt-research",
+        ))
+        await session.commit()
+    try:
+        page = await client.get("/api/v1/logs", params={"page": 1, "pageSize": 20, "range": "1y"})
+        assert page.status_code == 200, page.text
+        assert page.json()["typeCounts"].get("skill", 0) >= 1
+        assert "skill_resource" not in page.json()["typeCounts"]
+
+        filtered = await client.get("/api/v1/logs", params={
+            "type": "skill", "runId": run_id, "range": "1y",
+        })
+        assert filtered.status_code == 200, filtered.text
+        assert [item["logId"] for item in filtered.json()["items"]] == [log_id]
+        assert filtered.json()["items"][0]["type"] == "skill"
+
+        by_run = await client.get("/api/v1/logs", params={"runId": run_id, "range": "1y"})
+        assert by_run.status_code == 200, by_run.text
+        assert by_run.json()["total"] == 1
+
+        detail = await client.get(f"/api/v1/logs/{log_id}")
+        assert detail.status_code == 200, detail.text
+        assert detail.json()["type"] == "skill"
+        assert detail.json()["chain"][0]["type"] == "skill"
+
+        bootstrap = await client.get("/api/v1/workspace/bootstrap")
+        assert bootstrap.status_code == 200, bootstrap.text
+        assert all(item["type"] in ("session", "mcp", "skill", "tool", "model", "system")
+                   for item in bootstrap.json()["logs"])
+
+        overview = await client.get("/api/v1/stats/overview")
+        assert overview.status_code == 200, overview.text
+        assert "skill_resource" not in overview.json()["typeCounts"]
+    finally:
+        await remove()

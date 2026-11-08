@@ -67,6 +67,8 @@ async def run(rec: Recorder) -> None:
             rec.state["model_id"] = model_id
             rec.note("admin", "新模型不再写入伪造延迟", entity.get("latencyMs") == 0, f"latencyMs={entity.get('latencyMs')}")
             await hit("模型详情", "GET", f"/api/v1/models/{model_id}")
+            revealed = await hit("查看模型上游 API Key", "GET", f"/api/v1/models/{model_id}/credential")
+            rec.note("admin", "模型上游 Key 可再次查看", bool(revealed and revealed.status_code == 200 and revealed.json().get("fullKey") == base_draft["apiKey"]), f"model_id={model_id}")
             await hit("保存模型配置", "PATCH", f"/api/v1/models/{model_id}", json={"note": "QA 已修改", "timeoutSeconds": 45})
             await hit("停用模型", "PATCH", f"/api/v1/models/{model_id}/enabled", json={"enabled": False})
             await hit("启用模型", "PATCH", f"/api/v1/models/{model_id}/enabled", json={"enabled": True})
@@ -95,6 +97,8 @@ async def run(rec: Recorder) -> None:
                 rec.state["call_identifier"] = call_identifier
                 rec.state["publication_token"] = created_body.get("fullKey", "")
                 await hit("修改发布版本", "PATCH", f"/api/v1/publications/{publication_id}", json={"enabled": True, "qpm": 30})
+                revealed_pub = await hit("查看发布版本 Key", "GET", f"/api/v1/publications/{publication_id}/credential")
+                rec.note("admin", "发布版本 Key 可再次查看", bool(revealed_pub and revealed_pub.status_code == 200 and revealed_pub.json().get("fullKey") == rec.state["publication_token"]), f"publication_id={publication_id}")
                 rotated = await hit("轮换发布版本密钥", "POST", f"/api/v1/publications/{publication_id}/key/rotate", json={"apiKey": f"alb_sk_qa_{uuid.uuid4().hex[:16]}"})
                 if rotated and rotated.status_code == 200:
                     rec.state["publication_token"] = rotated.json().get("fullKey", "")
@@ -184,6 +188,8 @@ async def run(rec: Recorder) -> None:
             token_response = await hit("重置 Agent Token", "POST", f"/api/v1/agents/{agent_id}/credential/reset")
             if token_response and token_response.status_code == 200:
                 rec.state["agent_token"] = token_response.json().get("fullKey", "")
+            revealed_agent = await hit("查看 Agent 访问凭证", "GET", f"/api/v1/agents/{agent_id}/credential")
+            rec.note("admin", "Agent Token 可再次查看", bool(revealed_agent and revealed_agent.status_code == 200 and revealed_agent.json().get("fullKey") == rec.state.get("agent_token")), f"agent_id={agent_id}")
             await hit("对话历史", "GET", f"/api/v1/agents/{agent_id}/history")
             await hit("测试会话运行（真实模型）", "POST", f"/api/v1/agents/{agent_id}/test-runs", expected=(200, 500, 504), json={"content": "请用一句话说明本次测试目的"})
             await hit("清理测试会话", "DELETE", f"/api/v1/agents/{agent_id}/test-session", expected=(200, 204))

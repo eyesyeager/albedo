@@ -61,8 +61,13 @@ async def test_publish_check_protocol_and_credential(client: AsyncClient) -> Non
     reset = await client.post("/api/v1/agents/agt-research/credential/reset")
     assert reset.json()["fullKey"].startswith("alb_agt_")
     assert reset.json()["credentialSuffix"] == reset.json()["fullKey"][-4:]
+    revealed = await client.get("/api/v1/agents/agt-research/credential")
+    assert revealed.status_code == 200, revealed.text
+    assert revealed.json()["fullKey"] == reset.json()["fullKey"]
+    assert revealed.json()["credentialSuffix"] == reset.json()["credentialSuffix"]
     bootstrap = await client.get("/api/v1/workspace/bootstrap")
     assert "accessKey" not in bootstrap.json()["settings"]
+    assert revealed.json()["fullKey"] not in json.dumps(bootstrap.json(), ensure_ascii=False)
 
     history = await client.get("/api/v1/agents/agt-research/history")
     assert history.json()["total"] >= 1
@@ -203,6 +208,10 @@ async def test_publication_versions_and_key_rotation(client: AsyncClient) -> Non
     publication = created.json()["publication"]
     assert publication["id"].startswith("pub-")
     assert created.json()["fullKey"] == draft["apiKey"]
+    revealed = await client.get(f"/api/v1/publications/{publication['id']}/credential")
+    assert revealed.status_code == 200, revealed.text
+    assert revealed.json()["fullKey"] == draft["apiKey"]
+    assert revealed.json()["credentialSuffix"] == "7890"
 
     duplicate = await client.post("/api/v1/models/mdl-gpt/publications", json=draft)
     assert duplicate.status_code == 409
@@ -215,6 +224,8 @@ async def test_publication_versions_and_key_rotation(client: AsyncClient) -> Non
     assert rotated.status_code == 200
     assert rotated.json()["fullKey"].endswith("7890")
     assert rotated.json()["entity"]["credentialSuffix"] == "7890"
+    revealed_after_rotate = await client.get(f"/api/v1/publications/{publication['id']}/credential")
+    assert revealed_after_rotate.json()["fullKey"] == "alb_sk_rotated_1234567890"
 
     weak = await client.post(f"/api/v1/publications/{publication['id']}/key/rotate", json={"apiKey": "short"})
     assert weak.status_code == 400

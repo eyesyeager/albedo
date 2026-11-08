@@ -1,7 +1,7 @@
 import re
 from typing import Any
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Response
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -14,11 +14,12 @@ from app.db.seed import to_row
 from app.db.session import get_db
 from app.schemas.domain import ModelPublication
 from app.schemas.requests import EnabledPatch, PublicationDraft, PublicationPatch
-from app.schemas.responses import WriteResponse
+from app.schemas.responses import CredentialView, WriteResponse
 from app.services.common import (
     commit_write,
     get_or_404,
     publication_to_dict,
+    reveal_credential,
     store_credential,
     validate_json_object,
     write_headers,
@@ -71,6 +72,18 @@ async def list_publications(
 ) -> list[dict]:
     rows = (await db.scalars(select(m.ModelPublication).where(m.ModelPublication.model_id == model_id))).all()
     return [publication_to_dict(row) for row in rows]
+
+
+@router.get("/publications/{publication_id}/credential", response_model=CredentialView, summary="查看发布版本 API Key")
+async def reveal_publication_credential(
+    publication_id: str,
+    response: Response,
+    db: AsyncSession = Depends(get_db),
+    _: m.Session = Depends(current_session),
+) -> dict:
+    await get_or_404(db, m.ModelPublication, publication_id)
+    response.headers["Cache-Control"] = "no-store"
+    return await reveal_credential(db, "model_publication_key", publication_id, "模型发布版本 API Key")
 
 
 @router.post("/models/{model_id}/publications", response_model=WriteResponse, status_code=201, summary="发布模型版本")

@@ -102,6 +102,12 @@ export interface ModelPublication {
   createdAt: string
 }
 
+export interface CredentialView {
+  fullKey: string
+  credentialSuffix: string
+  rotatedAt: string
+}
+
 export interface ModelResource {
   id: string
   name: string

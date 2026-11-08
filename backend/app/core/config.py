@@ -58,7 +58,7 @@ class Settings(BaseSettings):
     skill_storage: str = "cos"
     # bucket / region 非敏感，按部署环境给定默认值，可由环境变量覆盖。
     cos_bucket: str = "albedo-1305182252"
-    cos_region: str = "ap-guangzhou"
+    cos_region: str = "ap-nanjing"
     # 密钥只从环境变量或 .env 注入，绝不写入代码、文档与日志。
     cos_secret_id: str = ""
     cos_secret_key: str = ""

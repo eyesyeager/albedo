@@ -102,7 +102,7 @@ export function PublishVersionDialog({ model, open, onClose }: { model: ModelRes
         open={open}
         onClose={onClose}
         title="发布成功 · 请保存密钥"
-        description="该版本的自定义 API Key 仅展示这一次，关闭后无法再次查看"
+        description="请保存该版本的自定义 API Key，也可在模型详情的版本卡片中随时再次查看"
         width="lg"
         footer={<Button onClick={onClose} icon={<CheckCircle2 className="h-3.5 w-3.5" />}>我已保存</Button>}
       >

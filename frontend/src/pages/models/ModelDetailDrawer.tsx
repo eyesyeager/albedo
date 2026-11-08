@@ -8,6 +8,7 @@ import { publicationsOf } from '../../store/selectors'
 import { useWorkspace } from '../../store/workspace'
 import { Badge, Button, ConfirmDialog, CopyButton, Drawer, Field, Input, Modal, Switch, Textarea, toast } from '../../components/ui'
 import { ConnectionBadge } from '../../components/common/StatusBadge'
+import { RevealCredentialButton } from '../../components/common/RevealCredentialButton'
 
 export function ModelDetailDrawer({ modelId, onClose, onPublish }: { modelId: string | null; onClose: () => void; onPublish: () => void }) {
   const data = useWorkspace()
@@ -103,8 +104,14 @@ export function ModelDetailDrawer({ modelId, onClose, onPublish }: { modelId: st
           <Field label="Base URL" htmlFor="model-detail-base" required>
             <Input id="model-detail-base" className="font-mono text-xs" value={baseUrl} onChange={(event) => setBaseUrl(event.target.value)} />
           </Field>
-          <Field label="上游 API Key" hint="只读脱敏展示，不可在抽屉内编辑">
-            <code className="block rounded-field border border-line bg-canvas/50 px-3 py-2 font-mono text-xs text-ink-muted">{maskedUpstreamKey(model.credentialSuffix)}</code>
+          <Field label="上游 API Key" hint="默认脱敏展示，可在管理系统中查看完整值；不可在抽屉内编辑">
+            <div className="flex flex-wrap items-center gap-2">
+              <code className="min-w-0 flex-1 truncate rounded-field border border-line bg-canvas/50 px-3 py-2 font-mono text-xs text-ink-muted">{maskedUpstreamKey(model.credentialSuffix)}</code>
+              <RevealCredentialButton
+                reveal={() => api.models.revealCredential(model.id)}
+                title="查看模型上游 API Key"
+              />
+            </div>
           </Field>
           <Field label="超时时间" hint="接入模型时设定的上游请求超时，可在接入表单中修改">
             <code className="block rounded-field border border-line bg-canvas/50 px-3 py-2 font-mono text-xs text-ink-muted">{model.timeoutSeconds} 秒</code>
@@ -151,7 +158,13 @@ export function ModelDetailDrawer({ modelId, onClose, onPublish }: { modelId: st
                     <div><p className="font-mono text-xs font-semibold text-ink">••{version.credentialSuffix}</p><p className="text-[10px] text-ink-faint">Key 后缀</p></div>
                   </div>
                   <p className="mt-2 text-2xs text-ink-faint">发布于 {formatDateTime(version.createdAt)} · 请求头 {version.headersConfigured ? '已配置' : '未配置'}</p>
-                  <div className="mt-2 flex items-center gap-3">
+                  <div className="mt-2 flex flex-wrap items-center gap-3">
+                    <RevealCredentialButton
+                      reveal={() => api.models.revealPublicationKey(version.id)}
+                      title={`查看 ${version.version} 的 API Key`}
+                      label="查看密钥"
+                      link
+                    />
                     <button type="button" onClick={() => openRotate(version.id)} className="text-2xs font-medium text-brand transition-colors hover:text-brand-hover">轮换密钥 →</button>
                     <button type="button" onClick={() => setDeleteVersionId(version.id)} className="inline-flex items-center gap-1 text-2xs font-medium text-ink-faint transition-colors hover:text-danger">
                       <Trash2 className="h-3 w-3" />删除版本
@@ -168,7 +181,7 @@ export function ModelDetailDrawer({ modelId, onClose, onPublish }: { modelId: st
         open={rotatingId !== null}
         onClose={() => setRotatingId(null)}
         title={rotatedKey ? '新密钥已生效' : '轮换发布版本密钥'}
-        description={rotatedKey ? '完整密钥仅展示这一次，关闭后不可再次查看' : '保存后该版本旧 Key 立即失效，其他发布版本不受影响'}
+        description={rotatedKey ? '新密钥已生效，也可在版本卡片中随时再次查看' : '保存后该版本旧 Key 立即失效，其他发布版本不受影响'}
         width="md"
         footer={rotatedKey
           ? <Button onClick={() => setRotatingId(null)}>我已保存</Button>

@@ -94,11 +94,11 @@ curl -N -X POST http://localhost:8000/api/agui/v1/agents/{agentId}/run \
 curl http://localhost:8000/v1/models -H 'Authorization: Bearer <Publication Key>'
 ```
 
-Token 在管理面「智能体 → 发布」与「模型 → 发布版本」中签发或重置，完整值只在创建/重置响应出现一次；日志与导出仅保留后缀。
+Token 在管理面「智能体 → 发布」与「模型 → 发布版本」中签发或重置。创建/重置/轮换响应会返回完整值，之后也可在详情页通过「查看完整密钥」按需解密读取（需登录态、响应 `no-store`、写入审计日志）；bootstrap 与常规资源接口不下发明文，日志与导出仅保留后缀。
 
 ## 登录
 
-访问 Key 由后端 `DEMO_ACCESS_KEY` 环境变量注入（本机 `backend/.env`），前端不预填、不保存任何 Key。登录请求提交到服务端用 Argon2id 校验，Redis 记失败次数，成功下发 HttpOnly Cookie 会话；明文 Key 与凭证表内容不下发到浏览器，bootstrap 只返回 `accessKeySuffix`。生产环境会拒绝公开演示值，详见 `docs/运维信息.md`。
+访问 Key 由后端 `DEMO_ACCESS_KEY` 环境变量注入（本机 `backend/.env`），前端不预填、不保存任何 Key。登录请求提交到服务端用 Argon2id 校验，Redis 记失败次数，成功下发 HttpOnly Cookie 会话；bootstrap 不下发任何凭证明文，只返回 `accessKeySuffix`，模型与智能体凭证需通过登录态下的专用查看端点按需读取。生产环境会拒绝公开演示值，详见 `docs/运维信息.md`。
 
 可在「系统设置 → 访问与安全」中修改；退出登录会撤销服务端会话，业务数据保留在数据库。
 

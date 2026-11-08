@@ -38,5 +38,11 @@ class WriteResponse(DomainModel):
     toolCount: int | None = None
 
 
+class CredentialView(DomainModel):
+    fullKey: str
+    credentialSuffix: str
+    rotatedAt: str = ""
+
+
 class OkResponse(DomainModel):
     ok: bool = True

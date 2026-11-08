@@ -18,12 +18,12 @@ from app.core.logging import mask_text, sanitize
 from app.core.security import iso_after, new_id, now_iso
 from app.db import models as m
 from app.db.session import get_db
-from app.schemas.domain import ExportTask, LogDetail, PageResult
+from app.schemas.domain import ExportTask, LogDetail, PageResult, log_type_values, normalize_log_type
 from app.schemas.requests import ExportRequest
 from app.schemas.responses import WriteResponse
 from app.services.audit import audit
 from app.services.common import get_or_404
-from app.services.snapshot import row_dict
+from app.services.snapshot import log_dict
 from app.services.system_config import get_configs
 
 router = APIRouter(tags=["logs"])
@@ -151,11 +151,14 @@ async def query_logs(
     grouped = (
         await db.execute(select(m.LogEntry.type, func.count()).where(*conditions).group_by(m.LogEntry.type))
     ).all()
-    type_counts = {row[0]: int(row[1]) for row in grouped}
+    type_counts: dict[str, int] = {}
+    for raw_type, count in grouped:
+        canonical = normalize_log_type(raw_type)
+        type_counts[canonical] = type_counts.get(canonical, 0) + int(count)
 
     query_conditions = list(conditions)
     if type != "all":
-        query_conditions.append(m.LogEntry.type == type)
+        query_conditions.append(m.LogEntry.type.in_(log_type_values(type)))
     total = await db.scalar(select(func.count()).select_from(m.LogEntry).where(*query_conditions)) or 0
     rows = (
         await db.scalars(
@@ -167,7 +170,7 @@ async def query_logs(
         )
     ).all()
     return {
-        "items": [row_dict(row) for row in rows],
+        "items": [log_dict(row) for row in rows],
         "total": int(total),
         "page": page,
         "pageSize": pageSize,
@@ -190,9 +193,9 @@ async def generate_export(db: AsyncSession, row: m.ExportTask) -> dict[str, Any]
             agentId=str(filters.get("agentId") or "all"),
         )
         if filters.get("type") not in (None, "all"):
-            conditions.append(m.LogEntry.type == filters["type"])
+            conditions.append(m.LogEntry.type.in_(log_type_values(str(filters["type"]))))
         records = (await db.scalars(select(m.LogEntry).where(*conditions).order_by(m.LogEntry.timestamp.desc()))).all()
-    logs = [row_dict(record) for record in records]
+    logs = [log_dict(record) for record in records]
     content = build_csv(logs) if row.format == "csv" else build_json(logs)
     directory = Path(get_settings().export_dir)
     directory.mkdir(parents=True, exist_ok=True)
@@ -278,13 +281,13 @@ async def log_detail(
     _: m.Session = Depends(current_session),
 ) -> dict:
     row = await get_or_404(db, m.LogEntry, log_id)
-    detail = row_dict(row)
+    detail = log_dict(row)
     chain: list[dict[str, Any]] = []
     if row.run_id:
         related = (
             await db.scalars(select(m.LogEntry).where(m.LogEntry.run_id == row.run_id).order_by(m.LogEntry.timestamp.asc()))
         ).all()
-        chain = [row_dict(item) for item in related]
+        chain = [log_dict(item) for item in related]
     detail["chain"] = chain
     return detail
 

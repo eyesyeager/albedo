@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.security import decrypt_secret
 from app.db import models as m
+from app.schemas.domain import normalize_log_type
 from app.services.system_config import get_configs
 from app.services.trends import build_trend_points
 
@@ -65,6 +66,13 @@ def row_dict(
         result.update(extra)
     if "tokenUsage" in result:
         result["tokenUsage"] = token_usage_dict(result["tokenUsage"])
+    return result
+
+
+def log_dict(row: m.LogEntry) -> dict[str, Any]:
+    """读取日志行时兼容历史越界类型，避免单条脏数据让整个接口 500。"""
+    result = row_dict(row)
+    result["type"] = normalize_log_type(result.get("type"))
     return result
 
 
@@ -159,7 +167,7 @@ async def build_workspace(session: AsyncSession) -> dict[str, Any]:
             for row in skill_rows
         ],
         "tools": [row_dict(row) for row in tool_rows],
-        "logs": [row_dict(row) for row in log_rows],
+        "logs": [log_dict(row) for row in log_rows],
         "notifications": [row_dict(row) for row in notification_rows],
         "settings": settings,
         "systemConfig": config,
