@@ -18,7 +18,12 @@ from app.runtime.tools import build_tools, collect_tool_specs
 from app.runtime.types import RuntimeRequest, RuntimeResult, ToolSpec
 from app.services.audit import make_log_entry
 from app.services.system_config import limit
-from app.services.tool_usage import record_in_new_session
+from app.services.tool_usage import record_in_new_session, record_skill_load
+
+# L1/L2 及 L3 资源读取属于平台级上下文注入，不占用业务工具调用预算；
+# L3 脚本执行有实际副作用与资源消耗，仍按一次工具调用计数。
+SKILL_CONTEXT_KINDS = frozenset({"skill", "skill_resource"})
+SKILL_KINDS = frozenset({"skill", "skill_resource", "skill_script"})
 
 SOURCE_LABELS = {
     "test_session": "测试会话",
@@ -107,6 +112,21 @@ class RuntimeEngine:
             str(item["id"]): item
             for item in (snapshot.get("resolvedMounts") or {}).get("mcp") or []
         }
+        catalog = snapshot.get("skillCatalog") or []
+        if catalog:
+            # L1 清单常驻 system prompt，记录一次触发面注入。
+            await record_skill_load(
+                run_id=request.run_id,
+                thread_id=thread_id,
+                agent_id=request.agent_id,
+                skill_id="*",
+                version="",
+                level=1,
+                action="catalog",
+                member="",
+                status="success",
+                chars=len(json.dumps(catalog, ensure_ascii=False)),
+            )
         graph = self._build_graph(
             model,
             tools,
@@ -117,6 +137,12 @@ class RuntimeEngine:
             auto_retry=bool(advanced.get("autoRetry", True)),
             streaming=streaming,
             run_id=request.run_id,
+            thread_id=thread_id,
+            agent_id=request.agent_id,
+            skills={
+                str(item["id"]): item
+                for item in (snapshot.get("resolvedMounts") or {}).get("skill") or []
+            },
         )
         config = {"configurable": {"thread_id": thread_id}}
         before = None
@@ -193,7 +219,10 @@ class RuntimeEngine:
             finish_reason=finish_reason,
             usage=usage,
             duration_ms=duration_ms,
-            tool_call_count=len(ctx["collector"].tool_events),
+            # 与 PRD 口径一致：纯上下文加载不计入，L3 脚本执行计入。
+            tool_call_count=sum(
+                1 for event in ctx["collector"].tool_events if event.get("kind") not in SKILL_CONTEXT_KINDS
+            ),
             missing_variables=ctx["missing"],
         )
 
@@ -430,8 +459,12 @@ class RuntimeEngine:
         auto_retry: bool,
         streaming: bool = False,
         run_id: str = "",
+        thread_id: str = "",
+        agent_id: str = "",
+        skills: dict[str, dict] | None = None,
     ):
         tools_by_name = {tool.name: tool for tool in tools}
+        skill_map = skills or {}
         max_retries = 2 if auto_retry else 0
 
         async def prepare(state: AgentState) -> dict:
@@ -460,17 +493,37 @@ class RuntimeEngine:
             last = state["messages"][-1]
             calls = list(getattr(last, "tool_calls", []) or [])
             remaining = max(0, state["max_tool_calls"] - state["tool_call_count"])
-            allowed = calls[:remaining]
-            skipped = len(calls) - len(allowed)
             results: list[ToolMessage] = []
-            for call in allowed:
+            loaded = list(state.get("loaded_skills") or [])
+            business_calls = 0
+            skipped = 0
+            for call in calls:
                 tool_name = str(call.get("name") or "")
                 tool = tools_by_name.get(tool_name)
                 spec = spec_by_name.get(tool_name)
+                is_skill = spec is not None and spec.kind in SKILL_KINDS
+                is_context_load = spec is not None and spec.kind in SKILL_CONTEXT_KINDS
+                # 纯上下文加载不占预算；脚本执行与业务工具同等计数。
+                if not is_context_load and business_calls >= remaining:
+                    skipped += 1
+                    continue
+                if not is_context_load:
+                    business_calls += 1
                 started = time.perf_counter()
                 status = "success"
                 mcp_duration: int | None = None
-                if tool is None:
+                marker = ""
+                if is_skill and spec is not None and spec.kind == "skill":
+                    marker = f"{spec.resource_id}@{skill_map.get(spec.resource_id, {}).get('version', '')}"
+                if marker and marker in loaded:
+                    # L2 会话内去重：正文已在此前的 messages 中，不再重复灌入上下文。
+                    output = json.dumps({
+                        "status": "loaded",
+                        "level": 2,
+                        "cached": True,
+                        "summary": "该 Skill 指令已在本会话加载过，请直接遵循此前收到的指令，无需重复加载。",
+                    }, ensure_ascii=False)
+                elif tool is None:
                     output = json.dumps({"status": "error", "message": "工具未注册"}, ensure_ascii=False)
                     status = "failed"
                 elif spec is not None and spec.kind == "mcp":
@@ -501,6 +554,23 @@ class RuntimeEngine:
                     duration_ms=duration_ms,
                     run_id=run_id,
                 )
+                if marker and marker not in loaded:
+                    loaded.append(marker)
+                if is_skill and spec is not None:
+                    args = call.get("args") or {}
+                    target_id = str(args.get("skillId") or spec.resource_id)[:64]
+                    await record_skill_load(
+                        run_id=run_id,
+                        thread_id=thread_id,
+                        agent_id=agent_id,
+                        skill_id=target_id,
+                        version=str(skill_map.get(target_id, {}).get("version", ""))[:32],
+                        level=2 if spec.kind == "skill" else 3,
+                        action=spec.kind,
+                        member=str(args.get("path") or "")[:255],
+                        status=status,
+                        chars=len(str(output)),
+                    )
                 collector.tool_events.append({
                     "timestamp": now_iso(),
                     "kind": spec.kind if spec else "tool",
@@ -519,8 +589,9 @@ class RuntimeEngine:
                 ))
             return {
                 "messages": results,
-                "tool_call_count": state["tool_call_count"] + len(allowed),
+                "tool_call_count": state["tool_call_count"] + business_calls,
                 "finish_reason": "tool_limit" if skipped else state["finish_reason"],
+                "loaded_skills": loaded,
             }
 
         async def finalize(state: AgentState) -> dict:

@@ -105,7 +105,9 @@ async def build_workspace(session: AsyncSession) -> dict[str, Any]:
 
     versions_by_skill: dict[str, list[dict[str, Any]]] = defaultdict(list)
     for version in skill_version_rows:
-        versions_by_skill[version.skill_id].append(row_dict(version, drop={"id", "skill_id", "file_path", "manifest"}))
+        versions_by_skill[version.skill_id].append(
+            row_dict(version, drop={"id", "skill_id", "file_path", "manifest", "instructions", "frontmatter", "package_key", "entry"})
+        )
 
     # 被引用 Agent 数按挂载关系实时计算，避免库里 referenced_by 计数与实际挂载不一致。
     skill_refs: dict[str, int] = defaultdict(int)

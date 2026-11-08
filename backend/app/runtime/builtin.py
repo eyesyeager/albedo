@@ -23,6 +23,7 @@ import httpx
 from app.core.config import get_settings
 from app.core.errors import ApiException
 from app.core.network import assert_public_url
+from app.services.skill_package import extract_members
 
 BING_ENDPOINT = "https://www.bing.com/search"
 DUCKDUCKGO_ENDPOINT = "https://html.duckduckgo.com/html/"
@@ -317,6 +318,72 @@ async def run_code_interpreter(code: str) -> str:
     else:
         payload["summary"] = f"代码执行失败（退出码 {process.returncode}）：{err.strip()[:200] or '无错误输出'}"
     return dump(payload)
+
+
+# ---------------------------------------------------------------- Skill L3 脚本
+
+
+async def run_skill_script(source: str, package: Path, members: list[str]) -> dict:
+    """在受限进程中执行 Skill 包内脚本，只返回输出；脚本源码不进入上下文。
+
+    复用 code_interpreter 的 AST 静态拦截与 RLIMIT 降级沙箱（非容器级隔离）。
+    包内文本文件解压到同一临时工作目录，供脚本以相对路径读取。
+    """
+    settings = get_settings()
+    if not settings.sandbox_enabled:
+        return {"status": "degraded", "summary": "代码执行沙箱已关闭（SANDBOX_ENABLED=false）", "stdout": "", "stderr": ""}
+    problem = check_code(source or "")
+    if problem:
+        return {"status": "error", "summary": problem, "stdout": "", "stderr": ""}
+    timeout = max(1, int(settings.sandbox_timeout_seconds))
+    output_limit = max(200, int(settings.sandbox_max_output_chars))
+    with tempfile.TemporaryDirectory(prefix="albedo-skill-sandbox-") as workdir:
+        root = Path(workdir)
+        try:
+            extract_members(package, members, root)
+        except ApiException as exc:
+            return {"status": "error", "summary": exc.message, "stdout": "", "stderr": ""}
+        script = root / "main.py"
+        script.write_text(source, encoding="utf-8")
+        env = {
+            "PATH": "/usr/bin:/bin:/usr/local/bin",
+            "HOME": workdir,
+            "TMPDIR": workdir,
+            "PYTHONHASHSEED": "0",
+            "PYTHONDONTWRITEBYTECODE": "1",
+        }
+        process = await asyncio.create_subprocess_exec(
+            sys.executable, "-I", "-B", str(script),
+            cwd=workdir,
+            env=env,
+            stdin=asyncio.subprocess.DEVNULL,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+            start_new_session=True,
+            preexec_fn=_limit_setter(timeout, max(64, int(settings.sandbox_memory_mb))),
+        )
+        try:
+            stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=timeout)
+        except (asyncio.TimeoutError, TimeoutError):
+            try:
+                os.killpg(os.getpgid(process.pid), signal.SIGKILL)
+            except (ProcessLookupError, PermissionError):
+                process.kill()
+            await process.wait()
+            return {
+                "status": "degraded",
+                "summary": f"执行超过 {timeout} 秒上限，进程已终止",
+                "stdout": "", "stderr": "",
+            }
+        out = stdout.decode("utf-8", errors="replace")[:output_limit]
+        err = stderr.decode("utf-8", errors="replace")[:output_limit]
+        status = "success" if process.returncode == 0 else "error"
+        summary = (
+            f"脚本执行完成，输出 {len(out)} 字符"
+            if status == "success"
+            else f"脚本执行失败（退出码 {process.returncode}）：{err.strip()[:200] or '无错误输出'}"
+        )
+        return {"status": status, "exitCode": process.returncode, "stdout": out, "stderr": err, "summary": summary}
 
 
 # ---------------------------------------------------------------- 文件解析

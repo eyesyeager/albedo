@@ -3389,10 +3389,6 @@
             "type": "string",
             "title": "Name"
           },
-          "instructions": {
-            "type": "string",
-            "title": "Instructions"
-          },
           "fileName": {
             "type": "string",
             "title": "Filename"
@@ -3405,12 +3401,16 @@
             "type": "string",
             "contentMediaType": "application/octet-stream",
             "title": "File"
+          },
+          "instructions": {
+            "type": "string",
+            "title": "Instructions",
+            "default": ""
           }
         },
         "type": "object",
         "required": [
           "name",
-          "instructions",
           "fileName",
           "sizeBytes",
           "file"
@@ -3423,10 +3423,6 @@
             "type": "string",
             "title": "Name"
           },
-          "instructions": {
-            "type": "string",
-            "title": "Instructions"
-          },
           "fileName": {
             "type": "string",
             "title": "Filename"
@@ -3439,12 +3435,16 @@
             "type": "string",
             "contentMediaType": "application/octet-stream",
             "title": "File"
+          },
+          "instructions": {
+            "type": "string",
+            "title": "Instructions",
+            "default": ""
           }
         },
         "type": "object",
         "required": [
           "name",
-          "instructions",
           "fileName",
           "sizeBytes",
           "file"
@@ -5714,6 +5714,17 @@
           "instructions": {
             "type": "string",
             "title": "Instructions"
+          },
+          "triggerDescription": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Triggerdescription"
           },
           "version": {
             "type": "string",

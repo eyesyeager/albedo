@@ -32,15 +32,35 @@ async def load_mounts(session: AsyncSession, agent_id: str) -> dict[str, list[st
     return grouped
 
 
+async def load_skill_mount_versions(session: AsyncSession, agent_id: str) -> dict[str, str]:
+    """读取 Agent 挂载的 Skill 版本；空值代表旧数据，运行时回退为跟随当前版本。"""
+    rows = (
+        await session.scalars(
+            select(m.AgentMount).where(m.AgentMount.agent_id == agent_id, m.AgentMount.kind == "skill")
+        )
+    ).all()
+    return {row.resource_id: row.skill_version for row in rows if row.skill_version}
+
+
 async def replace_mounts(session: AsyncSession, agent_id: str, mounts: dict[str, list[str]]) -> None:
     existing = (await session.scalars(select(m.AgentMount).where(m.AgentMount.agent_id == agent_id))).all()
     for row in existing:
         await session.delete(row)
     keys = {"mcpIds": "mcp", "skillIds": "skill", "toolIds": "tool", "modelIds": "model"}
     await session.flush()
+    skill_versions: dict[str, str] = {}
+    if mounts.get("skillIds"):
+        rows = (await session.scalars(select(m.Skill).where(m.Skill.id.in_(mounts["skillIds"])))).all()
+        skill_versions = {row.id: row.version for row in rows}
     for key, kind in keys.items():
         for resource_id in mounts.get(key, []):
-            session.add(m.AgentMount(agent_id=agent_id, kind=kind, resource_id=resource_id))
+            session.add(m.AgentMount(
+                agent_id=agent_id,
+                kind=kind,
+                resource_id=resource_id,
+                # 挂载时固化版本：后续上传新版本不会改变已有 Agent 的行为。
+                skill_version=skill_versions.get(resource_id, "") if kind == "skill" else "",
+            ))
 
 
 async def publish_issues(session: AsyncSession, agent: m.Agent) -> list[str]:

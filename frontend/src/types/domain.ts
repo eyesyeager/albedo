@@ -66,6 +66,7 @@ export interface Skill {
   name: string
   description: string
   instructions: string
+  triggerDescription?: string | null
   version: string
   fileName: string
   fileSize: string

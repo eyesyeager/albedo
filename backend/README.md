@@ -39,7 +39,8 @@ npm install && npm run dev  # http://localhost:5173，/api 与 /v1 已代理至 
 - 写操作统一返回 `{entity, log, ...}`：实体与本次系统审计日志一并返回，供前端写回状态。
 - 会话权威存储在 MySQL `sessions` 表，Redis 用于失败计数、限流与加速；Redis 不可用时限流降级为进程内计数。
 - `app/adapters/gateway.py` 是唯一的外部服务网关：模型探测按类型选端点并校验真实响应结构，MCP 发现失败返回明确错误而非模拟工具。
-- `app/runtime/tools.py` 只注册真实实现；工具不可用时返回 `status:"error"`，绝不伪装成功。Skill 工具真实加载包内指令供模型遵循，并明确标注 `scriptExecuted:false`，不宣称执行了包内脚本。
+- `app/runtime/tools.py` 只注册真实实现；工具不可用时返回 `status:"error"`，绝不伪装成功。Skill 按三级渐进式披露加载：L1 由 `SKILL.md` frontmatter 的 `description` 作为触发面常驻 system prompt，L2 命中时加载版本冻结的 `SKILL.md` 正文，L3 按需读取包内资源、或在受限进程沙箱执行包内脚本（脚本源码不进上下文，只回传输出）。L2 与 L3 资源读取不占 `maxToolCalls`（L3 脚本执行仍按一次工具调用计数），L2 在同一会话内去重，分层事件写入 `skill_load_records`。脚本沙箱沿用 `code_interpreter` 的 AST 静态拦截 + `RLIMIT` 降级实现，**非容器级隔离**；无 `SKILL.md` 的旧式包仍按手填使用说明运行。
+- Skill 包以腾讯云 COS 为权威存储（`SKILL_STORAGE=cos`），`app/services/skill_storage.py` 统一负责上传、删除与读取；`var/skill-cache` 只保存不可变内容的本地只读缓存，供 L3 沙箱按路径使用。数据库只存相对 key 与 `cos://` URI，可多副本部署；dev 环境缺 COS 凭据时降级本地目录并告警。历史本地包用 `scripts/migrate_skills_to_cos.py` 迁移。
 - 单元测试用 `tests/fakes.py` 的确定性对话模型验证图编排，它只在 pytest 中使用，不参与任何生产代码路径。
 
 ## 真实数据管线

@@ -193,6 +193,8 @@ class Skill(Base):
     verified: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[str] = mapped_column(ISO, default="")
     updated_at: Mapped[str] = mapped_column(ISO, default="")
+    # L1 触发面：来自 SKILL.md frontmatter.description，说明「做什么 + 何时使用」。
+    trigger_description: Mapped[str | None] = mapped_column(Text, nullable=True, default="")
 
 
 class SkillVersion(Base):
@@ -207,6 +209,31 @@ class SkillVersion(Base):
     manifest: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
     note: Mapped[str] = mapped_column(Text, default="")
     created_at: Mapped[str] = mapped_column(ISO, default="")
+    # L2：该版本冻结的 SKILL.md 正文，运行时按挂载版本读取，不再随新版本覆盖。
+    instructions: Mapped[str | None] = mapped_column(Text, nullable=True, default="")
+    entry: Mapped[str | None] = mapped_column(String(255), nullable=True, default="")
+    # L3：容器内路径无关的相对 key，用于定位包文件。
+    package_key: Mapped[str | None] = mapped_column(String(255), nullable=True, default="")
+    frontmatter: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+
+
+class SkillLoadRecord(Base):
+    """L1/L2/L3 分层加载与执行的可观测记录，关联 runId 与版本。"""
+
+    __tablename__ = "skill_load_records"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    run_id: Mapped[str] = mapped_column(ID, index=True)
+    thread_id: Mapped[str] = mapped_column(ID)
+    agent_id: Mapped[str] = mapped_column(ID)
+    skill_id: Mapped[str] = mapped_column(ID, index=True)
+    version: Mapped[str] = mapped_column(String(32), default="")
+    level: Mapped[int] = mapped_column(Integer, default=0)
+    action: Mapped[str] = mapped_column(String(32), default="")
+    member: Mapped[str] = mapped_column(String(255), default="")
+    status: Mapped[str] = mapped_column(String(16), default="success")
+    chars: Mapped[int] = mapped_column(Integer, default=0)
+    timestamp: Mapped[str] = mapped_column(ISO, default="")
 
 
 class BuiltinTool(Base):

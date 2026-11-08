@@ -66,3 +66,13 @@ async def record_in_new_session(**kwargs) -> None:
             await session.commit()
     except Exception as exc:  # noqa: BLE001
         logger.warning("工具调用统计写入失败：%s", exc)
+
+
+async def record_skill_load(**kwargs) -> None:
+    """L1/L2/L3 分层加载与执行记录，关联 runId / threadId / 版本号。"""
+    try:
+        async with SessionLocal() as session:
+            session.add(m.SkillLoadRecord(timestamp=now_iso(), **kwargs))
+            await session.commit()
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Skill 分层加载记录写入失败：%s", exc)

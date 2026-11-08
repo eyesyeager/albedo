@@ -28,6 +28,7 @@ dependencies = [
   "pypdf>=6.21.4",
   "python-docx>=1.2.0",
   "openpyxl>=3.1.5",
+  "cos-python-sdk-v5>=1.9.30,<2",
 ]
 
 [dependency-groups]

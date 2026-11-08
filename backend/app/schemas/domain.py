@@ -57,6 +57,7 @@ class Skill(DomainModel):
     name: str
     description: str
     instructions: str
+    triggerDescription: str | None = None
     version: str
     fileName: str
     fileSize: str

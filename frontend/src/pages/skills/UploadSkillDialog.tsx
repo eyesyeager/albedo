@@ -89,7 +89,7 @@ export function UploadSkillDialog({ open, onClose, targetSkill }: { open: boolea
       footer={
         <>
           <Button variant="outline" onClick={onClose}>取消</Button>
-          <Button loading={uploading} disabled={!name.trim() || !file || !instructions.trim()} onClick={submit}>{targetSkill ? '上传新版本' : '上传并校验'}</Button>
+          <Button loading={uploading} disabled={!name.trim() || !file} onClick={submit}>{targetSkill ? '上传新版本' : '上传并校验'}</Button>
         </>
       }
     >
@@ -141,8 +141,8 @@ export function UploadSkillDialog({ open, onClose, targetSkill }: { open: boolea
           </div>
         </Field>
 
-        <Field label="使用说明" htmlFor="skill-instructions" required hint="必填：功能介绍、使用步骤与系统要求">
-          <Textarea id="skill-instructions" rows={4} value={instructions} placeholder={'功能：……\n使用步骤：……\n系统要求：Python 3.10+'} onChange={(event) => { setInstructions(event.target.value); setError('') }} />
+        <Field label="使用说明（可选）" htmlFor="skill-instructions" hint="包内 SKILL.md 会被自动解析为触发描述与指令；仅旧式包需要在此手填">
+          <Textarea id="skill-instructions" rows={4} value={instructions} placeholder={'若包内无 SKILL.md，请填写：功能、使用步骤与系统要求'} onChange={(event) => { setInstructions(event.target.value); setError('') }} />
         </Field>
 
         {error && <p className="field-error" role="alert">{error}</p>}

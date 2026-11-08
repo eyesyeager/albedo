@@ -28,6 +28,7 @@ BUSINESS_TABLES: tuple[type, ...] = (
     m.McpCallRecord,
     m.Skill,
     m.SkillVersion,
+    m.SkillLoadRecord,
     m.BuiltinTool,
     m.Run,
     m.ChatMessage,

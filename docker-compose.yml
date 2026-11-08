@@ -1,0 +1,105 @@
+# Albedo 后端服务部署（前端静态资源由外部自行托管）
+#   docker compose --env-file deploy/.env up -d --build
+#
+# 服务：backend(uvicorn) / worker(arq) / init(一次性迁移+seed) / mysql / redis
+# 仅 backend 暴露 API 端口，供你自己的前端网关/静态托管层反向代理。
+# 前端构建产物用 frontend/Dockerfile 单独导出，不参与本编排。
+# 业务状态在 MySQL、Redis、COS 与 backend_var volume。
+
+name: albedo
+
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+x-backend: &backend-common
+  build:
+    context: .
+    dockerfile: backend/Dockerfile
+  image: albedo-backend:local
+  env_file: ./deploy/.env
+  # 防呆：这两项缺失会导致启动失败或「重启后加密数据不可解密」，直接拒绝启动。
+  # environment 优先级高于 env_file，会用插值后的值覆盖同名项。
+  environment:
+    SECRET_KEY: "${SECRET_KEY:?SECRET_KEY 必须生成固定值并备份，否则重启后加密凭据不可解密}"
+    DEMO_ACCESS_KEY: "${DEMO_ACCESS_KEY:?DEMO_ACCESS_KEY 必填，不得使用公开演示值}"
+  volumes:
+    - backend_var:/app/backend/var
+  restart: unless-stopped
+  logging: *default-logging
+
+services:
+  mysql:
+    image: mysql:8.0
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+      - --default-authentication-plugin=mysql_native_password
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?缺少 MYSQL_ROOT_PASSWORD，请检查 deploy/.env}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-albedo}
+      MYSQL_USER: ${MYSQL_USER:-albedo}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:?缺少 MYSQL_PASSWORD，请检查 deploy/.env}
+      TZ: Asia/Shanghai
+    volumes:
+      - mysql_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uroot -p\"$$MYSQL_ROOT_PASSWORD\" --silent"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 30s
+    restart: unless-stopped
+    logging: *default-logging
+
+  redis:
+    image: redis:8-alpine
+    command: ["redis-server", "--appendonly", "yes", "--requirepass", "${REDIS_PASSWORD:?缺少 REDIS_PASSWORD，请检查 deploy/.env}"]
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
+      TZ: Asia/Shanghai
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli -a \"$$REDIS_PASSWORD\" ping | grep -q PONG"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+    logging: *default-logging
+
+  # 一次性任务：alembic upgrade head + 幂等 seed。幂等，可随每次 up 重复执行。
+  init:
+    <<: *backend-common
+    command: ["python", "scripts/init_db.py"]
+    restart: "no"
+    depends_on:
+      mysql:
+        condition: service_healthy
+
+  backend:
+    <<: *backend-common
+    # 默认只绑定回环，由同机网关反代；网关在别的机器上时把 BACKEND_BIND 设为 0.0.0.0。
+    ports:
+      - "${BACKEND_BIND:-127.0.0.1}:${BACKEND_PORT:-8000}:8000"
+    depends_on:
+      init:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+
+  worker:
+    <<: *backend-common
+    command: ["arq", "app.worker.WorkerSettings"]
+    depends_on:
+      init:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+
+volumes:
+  mysql_data:
+  redis_data:
+  backend_var:

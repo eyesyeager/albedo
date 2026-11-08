@@ -16,3 +16,6 @@ backend/var/
 backend/.venv/
 __pycache__/
 .pytest_cache/
+
+# Docker 部署凭据（deploy/.env.example 需保留）
+deploy/.env

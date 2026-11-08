@@ -1,5 +1,5 @@
+import logging
 import re
-import shutil
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, File, Form, UploadFile
@@ -7,7 +7,6 @@ from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import current_session
-from app.core.config import get_settings
 from app.core.errors import ApiException
 from app.core.security import new_id, now_iso
 from app.db import models as m
@@ -21,10 +20,20 @@ from app.services.common import (
     validate_blank,
     validate_name,
 )
-from app.services.skill_package import inspect_zip
+from app.services.skill_package import inspect_zip, package_key
+from app.services.skill_storage import delete_async, delete_prefix_async, put_async
 from app.services.system_config import get_configs, limit as config_limit
 
 router = APIRouter(tags=["skills"])
+logger = logging.getLogger("albedo.skills")
+
+
+async def cleanup_orphan_package(key: str) -> None:
+    """数据库写入失败时尽力清理已上传的对象，避免对象存储中留下孤儿包。"""
+    try:
+        await delete_async(key)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Skill 孤儿包清理失败 key=%s：%s", key, exc)
 
 
 def max_skill_bytes() -> int:
@@ -41,6 +50,35 @@ def size_label(size_bytes: int) -> str:
 
 def description_of(instructions: str) -> str:
     return re.split(r"[。\n]", instructions)[0][:60]
+
+
+def resolve_instructions(form_text: str, package: dict) -> tuple[str, str, str]:
+    """确定 L2 正文与 L1 触发面。
+
+    包内含 SKILL.md 时以包为准（frontmatter.description 是触发面）；
+    旧式包无 SKILL.md 时降级为表单手填的使用说明，保持向后兼容。
+    """
+    body = str(package.get("body") or "").strip()
+    frontmatter = package.get("frontmatter") or {}
+    trigger = str(frontmatter.get("description") or "").strip()[:1024]
+    if package.get("hasSkillMd") and body:
+        summary = (trigger or description_of(body))[:1024]
+        return body, summary, trigger
+    guide = validate_blank(
+        form_text,
+        "使用说明为必填：请填写功能、使用步骤与系统要求，或上传包含 SKILL.md 的 Skill 包",
+    )
+    return guide.strip(), description_of(guide), ""
+
+
+def version_fields(skill_id: str, version: str, file_name: str, package: dict, instructions: str) -> dict:
+    """L2/L3 所需的版本级字段：冻结正文、入口、包定位 key、frontmatter。"""
+    return {
+        "instructions": instructions,
+        "entry": str(package.get("entry") or ""),
+        "package_key": package_key(skill_id, version, file_name),
+        "frontmatter": package.get("frontmatter") or None,
+    }
 
 
 async def read_upload(file: UploadFile, file_name: str, size_bytes: int) -> tuple[bytes, dict]:
@@ -60,11 +98,9 @@ async def read_upload(file: UploadFile, file_name: str, size_bytes: int) -> tupl
     return content, package
 
 
-def save_package(skill_id: str, version: str, file_name: str, content: bytes) -> str:
-    target = Path(get_settings().skill_dir) / skill_id / version / Path(file_name).name
-    target.parent.mkdir(parents=True, exist_ok=True)
-    target.write_bytes(content)
-    return str(target)
+async def save_package(skill_id: str, version: str, file_name: str, content: bytes) -> str:
+    """把包写入配置的存储后端，返回存储 URI（COS URI 或本地绝对路径）。"""
+    return await put_async(package_key(skill_id, version, file_name), content)
 
 
 @router.get("/skills", response_model=list[Skill], summary="Skill 列表")
@@ -79,66 +115,76 @@ async def list_skills(
 @router.post("/skills", response_model=WriteResponse, status_code=201, summary="上传 Skill（multipart）")
 async def create_skill(
     name: str = Form(...),
-    instructions: str = Form(...),
     fileName: str = Form(...),
     sizeBytes: int = Form(...),
     file: UploadFile = File(...),
+    instructions: str = Form(""),
     db: AsyncSession = Depends(get_db),
     _: m.Session = Depends(current_session),
 ) -> dict:
     display_name = validate_name(name, "Skill 展示名称")
-    guide = validate_blank(instructions, "使用说明为必填，请填写功能、使用步骤与系统要求")
     config = await get_configs(db)
     skill_defaults = config["defaults"]["skill"]
     first_version = str(skill_defaults["firstVersion"])
     content, package = await read_upload(file, fileName, sizeBytes)
+    guide, summary, trigger = resolve_instructions(instructions, package)
     label = size_label(len(content))
     skill_id = new_id("skill-")
     stamp = now_iso()
-    path = save_package(skill_id, first_version, fileName, content)
-    row = m.Skill(
-        id=skill_id,
-        name=display_name,
-        description=description_of(guide),
-        instructions=guide.strip(),
-        version=first_version,
-        file_name=fileName,
-        file_size=label,
-        size_bytes=len(content),
-        referenced_by=0,
-        verified=True,
-        created_at=stamp,
-        updated_at=stamp,
-    )
-    db.add(row)
-    db.add(m.SkillVersion(
-        skill_id=skill_id,
-        version=first_version,
-        file_size=label,
-        file_path=path,
-        manifest=package["manifest"] or {"files": package["files"], "uncompressedBytes": package["uncompressedBytes"]},
-        note=str(skill_defaults["firstNote"]),
-        created_at=stamp,
-    ))
-    await db.flush()
-    entity = await skill_to_dict(db, row)
-    return await commit_write(db, entity, "上传 Skill", f"上传「{display_name}」{first_version}，包体积 {label}", resource_id=skill_id)
+    key = package_key(skill_id, first_version, fileName)
+    path = await save_package(skill_id, first_version, fileName, content)
+    try:
+        row = m.Skill(
+            id=skill_id,
+            name=display_name,
+            description=summary,
+            instructions=guide,
+            version=first_version,
+            file_name=fileName,
+            file_size=label,
+            size_bytes=len(content),
+            referenced_by=0,
+            verified=True,
+            created_at=stamp,
+            updated_at=stamp,
+            trigger_description=trigger,
+        )
+        db.add(row)
+        db.add(m.SkillVersion(
+            skill_id=skill_id,
+            version=first_version,
+            file_size=label,
+            file_path=path,
+            manifest=package["manifest"] or {"files": package["files"], "uncompressedBytes": package["uncompressedBytes"]},
+            note=str(skill_defaults["firstNote"]),
+            created_at=stamp,
+            **version_fields(skill_id, first_version, fileName, package, guide),
+        ))
+        await db.flush()
+        entity = await skill_to_dict(db, row)
+        return await commit_write(
+            db, entity, "上传 Skill",
+            f"上传「{display_name}」{first_version}，包体积 {label}", resource_id=skill_id,
+        )
+    except Exception:
+        await cleanup_orphan_package(key)
+        raise
 
 
 @router.post("/skills/{skill_id}/versions", response_model=WriteResponse, status_code=201, summary="上传 Skill 新版本")
 async def create_skill_version(
     skill_id: str,
     name: str = Form(...),
-    instructions: str = Form(...),
     fileName: str = Form(...),
     sizeBytes: int = Form(...),
     file: UploadFile = File(...),
+    instructions: str = Form(""),
     db: AsyncSession = Depends(get_db),
     _: m.Session = Depends(current_session),
 ) -> dict:
     row = await get_or_404(db, m.Skill, skill_id)
-    guide = validate_blank(instructions, "使用说明为必填，请填写功能、使用步骤与系统要求")
     content, package = await read_upload(file, fileName, sizeBytes)
+    guide, summary, trigger = resolve_instructions(instructions, package)
     existing = (await db.scalars(select(m.SkillVersion).where(m.SkillVersion.skill_id == skill_id))).all()
     match = re.match(r"^v(\d+)\.(\d+)\.(\d+)$", row.version)
     version = f"v{match.group(1)}.{int(match.group(2)) + 1}.0" if match else f"v1.{len(existing) + 1}.0"
@@ -146,31 +192,38 @@ async def create_skill_version(
         raise ApiException("duplicate_identifier", "该版本号已存在，请使用新的版本号", 409)
     label = size_label(len(content))
     stamp = now_iso()
-    path = save_package(skill_id, version, fileName, content)
-    row.name = name.strip() or row.name
-    row.description = description_of(guide)
-    row.instructions = guide.strip()
-    row.version = version
-    row.file_name = fileName
-    row.file_size = label
-    row.size_bytes = len(content)
-    row.verified = True
-    row.updated_at = stamp
-    db.add(m.SkillVersion(
-        skill_id=skill_id,
-        version=version,
-        file_size=label,
-        file_path=path,
-        manifest=package["manifest"] or {"files": package["files"], "uncompressedBytes": package["uncompressedBytes"]},
-        note="新增版本，历史包保留",
-        created_at=stamp,
-    ))
-    await db.flush()
-    entity = await skill_to_dict(db, row)
-    return await commit_write(
-        db, entity, "上传 Skill 新版本",
-        f"「{row.name}」发布 {version}，历史版本保留，已有 Agent 不自动升级", resource_id=skill_id,
-    )
+    key = package_key(skill_id, version, fileName)
+    path = await save_package(skill_id, version, fileName, content)
+    try:
+        row.name = name.strip() or row.name
+        row.description = summary
+        row.instructions = guide
+        row.trigger_description = trigger
+        row.version = version
+        row.file_name = fileName
+        row.file_size = label
+        row.size_bytes = len(content)
+        row.verified = True
+        row.updated_at = stamp
+        db.add(m.SkillVersion(
+            skill_id=skill_id,
+            version=version,
+            file_size=label,
+            file_path=path,
+            manifest=package["manifest"] or {"files": package["files"], "uncompressedBytes": package["uncompressedBytes"]},
+            note="新增版本，历史包保留",
+            created_at=stamp,
+            **version_fields(skill_id, version, fileName, package, guide),
+        ))
+        await db.flush()
+        entity = await skill_to_dict(db, row)
+        return await commit_write(
+            db, entity, "上传 Skill 新版本",
+            f"「{row.name}」发布 {version}，历史版本保留，已有 Agent 不自动升级", resource_id=skill_id,
+        )
+    except Exception:
+        await cleanup_orphan_package(key)
+        raise
 
 
 @router.get("/skills/{skill_id}", response_model=Skill, summary="Skill 详情")
@@ -217,14 +270,19 @@ async def remove_skill(
     versions = (
         await db.scalars(select(m.SkillVersion).where(m.SkillVersion.skill_id == skill_id))
     ).all()
-    package_paths = [Path(item.file_path) for item in versions if item.file_path]
+    # 迁移前创建的版本没有 package_key，只有本地 file_path，仍需兼容清理。
+    legacy_paths = [
+        Path(str(item.file_path))
+        for item in versions
+        if not item.package_key and item.file_path and not str(item.file_path).startswith("cos://")
+    ]
     await db.execute(delete(m.SkillVersion).where(m.SkillVersion.skill_id == skill_id))
     await db.delete(row)
     result = await commit_write(
-        db, None, "删除 Skill", f"删除「{name}」，同时清理 {version_count} 个历史版本与本地包文件",
+        db, None, "删除 Skill", f"删除「{name}」，同时清理 {version_count} 个历史版本与对象存储包",
         resource_id=skill_id,
     )
-    for path in package_paths:
+    await delete_prefix_async(f"{skill_id}/")
+    for path in legacy_paths:
         path.unlink(missing_ok=True)
-    shutil.rmtree(Path(get_settings().skill_dir) / skill_id, ignore_errors=True)
     return result

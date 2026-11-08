@@ -151,6 +151,9 @@ def default_system_config() -> dict[str, Any]:
             "skillMaxDepth": 6,
             # 运行时向模型提供的 Skill 指令上限：过小会让长指令 Skill 半失效。
             "skillInstructionMaxChars": 40000,
+            # L2 单次加载的 SKILL.md 正文上限（字符）。超出部分应下沉到 L3 资源文件按需读取。
+            "skillBodyMaxChars": 8000,
+
             "mcpTimeoutMin": 3,
             "mcpTimeoutMax": 600,
             # 默认仍禁止内网/本地 MCP；管理员显式开启后才放行自建服务。

@@ -54,6 +54,22 @@ class Settings(BaseSettings):
     skill_dir: str = str(BACKEND_ROOT / "var" / "skills")
     upload_dir: str = str(BACKEND_ROOT / "var" / "uploads")
 
+    # Skill 包存储：cos（权威对象存储） | local（单机/离线）。
+    skill_storage: str = "cos"
+    # bucket / region 非敏感，按部署环境给定默认值，可由环境变量覆盖。
+    cos_bucket: str = "albedo-1305182252"
+    cos_region: str = "ap-guangzhou"
+    # 密钥只从环境变量或 .env 注入，绝不写入代码、文档与日志。
+    cos_secret_id: str = ""
+    cos_secret_key: str = ""
+    cos_token: str = ""
+    cos_endpoint: str = ""
+    cos_scheme: str = "https"
+    cos_prefix: str = "skills"
+    cos_timeout_seconds: int = 30
+    # COS 对象的本地只读缓存：key 含 skillId/version，内容不可变，可安全长期复用。
+    skill_cache_dir: str = str(BACKEND_ROOT / "var" / "skill-cache")
+
     # 内置工具：联网搜索
     search_provider: str = "bing"  # bing | duckduckgo | tavily | serper | off
     search_api_key: str = ""
@@ -82,6 +98,10 @@ class Settings(BaseSettings):
     @property
     def cors_origin_list(self) -> list[str]:
         return [origin.strip() for origin in self.cors_origins.split(",") if origin.strip()]
+
+    @property
+    def cos_configured(self) -> bool:
+        return bool(self.cos_secret_id and self.cos_secret_key and self.cos_bucket and self.cos_region)
 
     @model_validator(mode="after")
     def validate_runtime_config(self) -> "Settings":
@@ -114,6 +134,8 @@ class Settings(BaseSettings):
             problems.append("非 dev 环境必须设置 CSRF_ENABLED=true")
         if "*" in self.cors_origin_list:
             problems.append("非 dev 环境 CORS_ORIGINS 禁止通配来源")
+        if self.skill_storage == "cos" and not self.cos_configured:
+            problems.append("SKILL_STORAGE=cos 时必须显式配置 COS_SECRET_ID / COS_SECRET_KEY")
         if problems:
             raise ValueError("生产环境配置校验失败：" + "；".join(problems))
         return self

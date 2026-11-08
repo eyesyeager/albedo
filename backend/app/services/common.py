@@ -99,7 +99,10 @@ async def skill_to_dict(session: AsyncSession, row: m.Skill) -> dict[str, Any]:
             select(m.SkillVersion).where(m.SkillVersion.skill_id == row.id).order_by(m.SkillVersion.created_at.desc())
         )
     ).all()
-    data["versions"] = [row_dict(item, drop={"id", "skill_id", "file_path", "manifest"}) for item in versions]
+    data["versions"] = [
+        row_dict(item, drop={"id", "skill_id", "file_path", "manifest", "instructions", "frontmatter", "package_key", "entry"})
+        for item in versions
+    ]
     # 引用数由挂载关系实时统计，不复用库内可能过期的 referenced_by 计数。
     data["referencedBy"] = int(
         await session.scalar(
