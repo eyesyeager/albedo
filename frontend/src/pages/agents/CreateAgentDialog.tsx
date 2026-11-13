@@ -23,7 +23,7 @@ export function CreateAgentDialog({ open, onClose }: { open: boolean; onClose: (
     if (!open) return
     setForm({ ...EMPTY, defaultModelId: available[0]?.id ?? '' })
     setError('')
-  }, [open, available.length])
+  }, [open])
 
   const update = (patch: Partial<typeof EMPTY>) => {
     setForm((current) => ({ ...current, ...patch }))

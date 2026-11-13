@@ -7,7 +7,7 @@
 ```
 albedo/
 ├── frontend/            # React 前端工程（唯一数据来源：后端管理面 API）
-├── backend/             # Python 3.12 + FastAPI 管理面与对外网关后端（M0–M6 已实现）
+├── backend/             # Python 3.12 + FastAPI 管理面与对外网关后端
 ├── packages/contracts/  # OpenAPI 3.1 契约快照与生成脚本
 ├── docs/                # 产品文档、原型截图与后端设计文档
 └── README.md            # 本文件
@@ -68,12 +68,25 @@ uv run uvicorn app.main:app --reload --port 8000
 验证：
 
 ```bash
-cd backend && PYTHONPATH=. uv run pytest -q
+# 集成测试会删除并写入固定 ID 的基线数据，必须使用独立数据库，禁止连接业务库。
+cd backend && ALBEDO_TEST_DATABASE_URL='mysql+aiomysql://user:pass@127.0.0.1:3306/albedo_test' \
+  PYTHONPATH=. uv run pytest -q
 cd frontend && npm run typecheck && npm run build
 bash packages/contracts/generate.sh --check
 ```
 
-实现范围为 M0–M6：契约、基础设施/认证/快照、四类资源、Agent 与发布配置、日志与治理、LangGraph 运行引擎、真实模型与 Redis checkpointer、标准对话/AGUI/模型透传对外网关，以及 SSRF、Skill 包校验、脱敏、签名下载与并发乐观锁等安全加固。模型连接测试、MCP 工具发现、工具调用与统计趋势均为真实链路，不存在离线模拟或预置演示数据。
+CI 见 `.github/workflows/ci.yml`，包含隔离库测试、契约快照比对、密钥/运行时产物扫描与前端构建。
+
+`ENVIRONMENT` 默认是 `prod`（会强制校验 Secure Cookie、CSRF、演示 Key、Fernet 密钥等）；仅本地开发可显式设置 `ENVIRONMENT=dev`。dev 下未配置 `SECRET_KEY` 时会生成并复用 `backend/var/.dev-secret-key`，避免重启后已加密凭据不可解密。轮换密钥时用 `SECRET_KEY_PREVIOUS` 提供旧值，并执行 `python scripts/rotate_secrets.py --confirm` 重加密存量密文。
+
+安全开关只能由部署期环境变量控制，不能经管理面接口修改：
+
+- `SANDBOX_ENABLED` 默认 `false`：代码解释器与 Skill 脚本执行默认关闭，关闭时也不向模型暴露对应工具。开启前必须把后端放进容器 / seccomp / 只读文件系统隔离，应用层白名单只是纵深防御；开启后脚本通过 `RESOURCES["相对路径"]` 读取包内文本，不能使用 `open()`。
+- `MCP_STDIO_ENABLED` 默认 `false`，需与 `MCP_STDIO_ALLOWED_COMMANDS`（逗号分隔的可执行文件名，如 `python3`）同时配置。stdio MCP 只接受纯文件名并按固定系统路径解析，`env` 不得覆盖 `PATH` / `LD_*` / `PYTHONPATH` 等可劫持执行的变量。
+- 提示词模板只支持 `{{变量名}}`，不执行模板表达式或过滤器。
+- `python scripts/backup_db.py` 生成加密备份（`.json.enc`，权限 0600），排除 `sessions` 并剔除 `runs.config_snapshot`；恢复用 `python scripts/restore_db.py <备份文件> --confirm`。
+
+仓库包含契约、基础设施/认证/工作区快照、四类资源、Agent 与发布配置、日志与治理、LangGraph 运行引擎、真实模型与 Redis checkpointer、标准对话/AGUI/模型透传对外网关，以及 SSRF、Skill 包校验、脱敏、签名下载与并发乐观锁等安全加固。模型连接测试、MCP 工具发现、工具调用与统计趋势均为真实链路，无离线模拟。生产初始化（`backend/scripts/init_db.py`）只写入系统必需配置与内置工具目录，不写入演示业务数据；集成测试使用独立数据库并会写入固定测试基线，切勿在业务库执行（见下方验证命令）。
 
 ## 对外 API
 

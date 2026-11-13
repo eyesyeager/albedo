@@ -1,6 +1,7 @@
 import { useNavigate } from 'react-router-dom'
 import { AlertCircle, CheckCircle2, Info } from 'lucide-react'
 import { formatRelative } from '../../lib/format'
+import { asError } from '../../lib/errors'
 import { useWorkspace } from '../../store/workspace'
 import { api } from '../../lib/api'
 import { Badge, Button, toast } from '../ui'
@@ -16,9 +17,13 @@ export function NotificationPanel({ onClose }: { onClose: () => void }) {
   const notifications = useWorkspace((state) => state.notifications)
   const unread = notifications.filter((item) => !item.read).length
 
-  const markAll = () => {
-    void api.notifications.readAll()
-    toast.success('已全部标记为已读')
+  const markAll = async () => {
+    try {
+      await api.notifications.readAll()
+      toast.success('已全部标记为已读')
+    } catch (reason) {
+      toast.error(asError(reason).message)
+    }
   }
 
   return (

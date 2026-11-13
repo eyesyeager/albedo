@@ -1,5 +1,5 @@
-import { useEffect, type ReactNode } from 'react'
-import { createBrowserRouter, Navigate, useLocation } from 'react-router-dom'
+import { Component, useEffect, type ErrorInfo, type ReactNode } from 'react'
+import { createBrowserRouter, Navigate, useLocation, useRouteError } from 'react-router-dom'
 import { useAuth } from './store/auth'
 import { fetchSession } from './lib/http'
 import { AppShell } from './components/layout/AppShell'
@@ -13,6 +13,44 @@ import { ToolsPage } from './pages/ToolsPage'
 import { ModelsPage } from './pages/ModelsPage'
 import { LogsPage } from './pages/LogsPage'
 import { SettingsPage } from './pages/SettingsPage'
+
+function FatalError({ message }: { message: string }) {
+  return (
+    <div style={{ display: 'flex', minHeight: '100vh', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 12, background: '#F7F8FA', color: '#374151', fontFamily: 'system-ui, sans-serif', fontSize: 14 }}>
+      <p style={{ fontSize: 16, fontWeight: 600 }}>页面加载失败</p>
+      <p style={{ color: '#6B7280', maxWidth: 480, textAlign: 'center' }}>{message}</p>
+      <button
+        type="button"
+        style={{ padding: '8px 16px', borderRadius: 8, border: '1px solid #D1D5DB', background: '#fff', cursor: 'pointer' }}
+        onClick={() => window.location.reload()}
+      >重新加载</button>
+    </div>
+  )
+}
+
+/** 根错误边界：捕获 RouterProvider 之外以及组件树中的渲染异常，避免整站白屏。 */
+export class RootErrorBoundary extends Component<{ children: ReactNode }, { error: Error | null }> {
+  state: { error: Error | null } = { error: null }
+
+  static getDerivedStateFromError(error: Error) {
+    return { error }
+  }
+
+  componentDidCatch(error: Error, info: ErrorInfo) {
+    console.error('[albedo] 渲染异常：', error, info.componentStack)
+  }
+
+  render() {
+    if (this.state.error) return <FatalError message={this.state.error.message} />
+    return this.props.children
+  }
+}
+
+function RouteError() {
+  const error = useRouteError()
+  const message = error instanceof Error ? error.message : String(error ?? '未知错误')
+  return <FatalError message={message} />
+}
 
 function RequireAuth({ children }: { children: ReactNode }) {
   const authenticated = useAuth((state) => state.authenticated)
@@ -30,7 +68,8 @@ function RequireAuth({ children }: { children: ReactNode }) {
         if (!cancelled) console.warn('[albedo] 会话复核失败，保持当前登录态：', error)
       })
     return () => { cancelled = true }
-  }, [authenticated])
+    // 路由切换时也复核一次会话，避免长时间停留在单页时会话过期不被发现。
+  }, [authenticated, location.pathname])
 
   if (!authenticated) return <Navigate to="/login" replace state={{ from: location.pathname }} />
   return <>{children}</>
@@ -42,10 +81,11 @@ function LoginRoute() {
 }
 
 export const router = createBrowserRouter([
-  { path: '/login', element: <LoginRoute /> },
+  { path: '/login', element: <LoginRoute />, errorElement: <RouteError /> },
   {
     path: '/',
     element: <RequireAuth><AppShell /></RequireAuth>,
+    errorElement: <RouteError />,
     children: [
       { index: true, element: <OverviewPage /> },
       { path: 'agents', element: <AgentsPage /> },

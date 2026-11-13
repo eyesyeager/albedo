@@ -1,8 +1,9 @@
-import { useEffect, useRef, type ReactNode } from 'react'
+import { useRef, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { X } from 'lucide-react'
 import { cn } from '../../lib/cn'
 import { UnsavedOverlay, useCloseGuard } from './UnsavedOverlay'
+import { useOverlayBehavior } from './Modal'
 
 export interface DrawerProps {
   open: boolean
@@ -22,26 +23,15 @@ const WIDTHS = {
 }
 
 export function Drawer({ open, onClose, title, subtitle, children, footer, width = 'lg', dirty = false }: DrawerProps) {
+  const dialogRef = useRef<HTMLDivElement>(null)
   const guard = useCloseGuard(onClose, dirty)
   const guardRef = useRef(guard)
   guardRef.current = guard
 
-  useEffect(() => {
-    if (!open) return
-    const previous = document.activeElement as HTMLElement | null
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key !== 'Escape') return
-      if (guardRef.current.confirming) guardRef.current.cancel()
-      else guardRef.current.requestClose()
-    }
-    document.addEventListener('keydown', onKeyDown)
-    document.body.style.overflow = 'hidden'
-    return () => {
-      document.removeEventListener('keydown', onKeyDown)
-      document.body.style.overflow = ''
-      previous?.focus()
-    }
-  }, [open])
+  useOverlayBehavior(open, dialogRef, () => {
+    if (guardRef.current.confirming) guardRef.current.cancel()
+    else guardRef.current.requestClose()
+  })
 
   if (!open) return null
 
@@ -49,6 +39,7 @@ export function Drawer({ open, onClose, title, subtitle, children, footer, width
     <div className="fixed inset-0 z-50 flex justify-end">
       <div className="absolute inset-0 bg-ink/40 animate-fade-in" onClick={guard.requestClose} />
       <div
+        ref={dialogRef}
         role="dialog"
         aria-modal="true"
         aria-label={title}

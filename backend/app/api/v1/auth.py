@@ -8,7 +8,7 @@ from app.api.deps import optional_session
 from app.core.config import get_settings
 from app.core.errors import ApiException
 from app.core.redis_client import try_delete, try_get_count, try_increment
-from app.core.security import hash_secret, iso_after, new_session_id, now_iso, verify_secret
+from app.core.security import constant_time_equal, hash_secret, iso_after, new_session_id, now_iso, verify_secret
 from app.db import models as m
 from app.db.session import get_db
 from app.schemas.requests import LoginRequest
@@ -20,6 +20,11 @@ router = APIRouter(tags=["auth"])
 
 def _rate_key(request: Request) -> str:
     host = request.client.host if request.client else "unknown"
+    # 只有在受信任反向代理之后部署时才采信转发头，避免客户端伪造来源绕过限流。
+    if get_settings().trust_proxy_headers:
+        forwarded = request.headers.get("x-forwarded-for", "").split(",")[0].strip()
+        if forwarded:
+            host = forwarded
     return f"albedo:auth:fail:{host}"
 
 
@@ -68,16 +73,16 @@ async def login(payload: LoginRequest, request: Request, response: Response, db:
         value=session_id,
         httponly=True,
         secure=settings.cookie_secure,
-        samesite="lax",
+        samesite=settings.session_samesite,
         max_age=settings.session_absolute_hours * 3600,
         path="/",
     )
     response.set_cookie(
-        key="albedo_csrf",
+        key=settings.csrf_cookie_name,
         value=csrf_token,
         httponly=False,
         secure=settings.cookie_secure,
-        samesite="lax",
+        samesite=settings.session_samesite,
         max_age=settings.session_absolute_hours * 3600,
         path="/",
     )
@@ -92,14 +97,21 @@ async def login(payload: LoginRequest, request: Request, response: Response, db:
 @router.post("/auth/logout", response_model=LogoutResponse, summary="退出登录")
 async def logout(request: Request, response: Response, db: AsyncSession = Depends(get_db)) -> dict:
     settings = get_settings()
+    # 登出属于状态变更，必须校验 CSRF，否则可被跨站强制登出。
+    if settings.csrf_enabled:
+        expected = request.cookies.get(settings.csrf_cookie_name, "")
+        provided = request.headers.get("X-CSRF-Token", "")
+        if not expected or not constant_time_equal(expected, provided):
+            raise ApiException("invalid_api_key", "CSRF 校验失败，请刷新页面后重试", 403)
     session = await optional_session(request, db)
     log = None
     if session is not None:
         session.revoked_at = now_iso()
         log = await audit(db, "退出登录", "当前管理会话已结束")
         await db.commit()
-    response.delete_cookie(settings.session_cookie_name, path="/")
-    response.delete_cookie("albedo_csrf", path="/")
+    cookie_options = {"path": "/", "secure": settings.cookie_secure, "samesite": settings.session_samesite}
+    response.delete_cookie(settings.session_cookie_name, **cookie_options)
+    response.delete_cookie(settings.csrf_cookie_name, **cookie_options)
     return {"ok": True, "log": log}
 
 

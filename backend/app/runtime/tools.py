@@ -1,7 +1,7 @@
 import json
 import logging
 import re
-from datetime import datetime, timedelta, timezone
+from datetime import datetime
 from pathlib import Path
 
 from langchain_core.tools import BaseTool, StructuredTool
@@ -17,10 +17,11 @@ from app.runtime.builtin import (
 )
 from app.runtime.mcp_loader import load_server_tools
 from app.runtime.types import ToolSpec
+from app.core.config import get_settings
 from app.services.skill_package import MAX_SCRIPT_BYTES, read_member
+from app.services.trends import platform_tz
 
 _SAFE_NAME = re.compile(r"[^A-Za-z0-9_-]")
-LOCAL_TZ = timezone(timedelta(hours=8))
 logger = logging.getLogger("albedo.runtime.tools")
 
 
@@ -30,7 +31,11 @@ def safe_tool_name(index: int, name: str) -> str:
 
 
 def collect_tool_specs(snapshot: dict) -> list[ToolSpec]:
+    from app.core.config import get_settings
+
     resolved = snapshot.get("resolvedMounts") or {}
+    # 代码执行类能力默认关闭；关闭时不把工具暴露给模型，避免无谓调用与绕过尝试。
+    sandbox_enabled = get_settings().sandbox_enabled
     specs: list[ToolSpec] = []
     for server in resolved.get("mcp") or []:
         for tool in server.get("tools") or []:
@@ -45,6 +50,8 @@ def collect_tool_specs(snapshot: dict) -> list[ToolSpec]:
             ))
     for tool in resolved.get("tool") or []:
         if not tool.get("enabled", True):
+            continue
+        if tool.get("key") == "code_interpreter" and not sandbox_enabled:
             continue
         specs.append(ToolSpec(
             key=f"tool:{tool['id']}",
@@ -75,13 +82,14 @@ def collect_tool_specs(snapshot: dict) -> list[ToolSpec]:
             kind="skill_resource",
             resource_id="*",
         ))
-        specs.append(ToolSpec(
-            key="skill:*:run_script",
-            name="执行 Skill 脚本",
-            description="L3 在受限沙箱执行指定 Skill 包内的 Python 脚本，需提供 skillId 与 path，只返回执行输出，脚本源码不进入上下文。",
-            kind="skill_script",
-            resource_id="*",
-        ))
+        if sandbox_enabled:
+            specs.append(ToolSpec(
+                key="skill:*:run_script",
+                name="执行 Skill 脚本",
+                description="L3 在受限沙箱执行指定 Skill 包内的 Python 脚本，需提供 skillId 与 path，只返回执行输出，脚本源码不进入上下文。",
+                kind="skill_script",
+                resource_id="*",
+            ))
     return specs
 
 
@@ -95,13 +103,15 @@ def make_tool(name: str, description: str, runner) -> BaseTool:
 
 def current_time_runner(tool_name: str):
     async def runner(query: str = "") -> str:
-        moment = datetime.now(LOCAL_TZ)
+        tz = platform_tz()
+        zone_name = get_settings().platform_timezone
+        moment = datetime.now(tz)
         return dump({
             "status": "success",
             "tool": tool_name,
             "time": moment.isoformat(timespec="seconds"),
-            "timezone": "Asia/Shanghai (UTC+8)",
-            "summary": f"当前时间 {moment.strftime('%Y-%m-%d %H:%M:%S')}（UTC+8）",
+            "timezone": zone_name,
+            "summary": f"当前时间 {moment.strftime('%Y-%m-%d %H:%M:%S')}（{zone_name}）",
         })
 
     return runner
@@ -263,7 +273,8 @@ async def resolve_tool(
         expected = spec.key.split(":", 2)[-1]
         loaded = preloaded if preloaded is not None else await load_server_tools(server)
         for tool in loaded:
-            if tool.name == expected or tool.name.endswith(expected):
+            # 精确匹配：后缀匹配会让被禁用的同名后缀工具（如 admin_delete）误绑定到已启用工具。
+            if str(tool.name) == expected:
                 return tool
         return make_tool(tool_name, spec.description, error_runner(tool_name, "MCP 连接失败或该工具不可用"))
 

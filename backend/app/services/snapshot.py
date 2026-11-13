@@ -1,10 +1,12 @@
 import json
 from collections import defaultdict
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.logging import mask_text
 from app.core.security import decrypt_secret
 from app.db import models as m
 from app.schemas.domain import normalize_log_type
@@ -70,9 +72,12 @@ def row_dict(
 
 
 def log_dict(row: m.LogEntry) -> dict[str, Any]:
-    """读取日志行时兼容历史越界类型，避免单条脏数据让整个接口 500。"""
+    """读取日志行时兼容历史越界类型，并对内容字段统一脱敏。"""
     result = row_dict(row)
     result["type"] = normalize_log_type(result.get("type"))
+    for key in ("name", "summary", "inputSummary", "outputSummary", "errorMessage"):
+        if isinstance(result.get(key), str):
+            result[key] = mask_text(result[key])
     return result
 
 
@@ -91,7 +96,13 @@ async def build_workspace(session: AsyncSession) -> dict[str, Any]:
     log_rows = (await session.scalars(
         select(m.LogEntry).order_by(m.LogEntry.timestamp.desc()).limit(int(limits["logSnapshotLimit"]))
     )).all()
-    all_timestamps = (await session.scalars(select(m.LogEntry.timestamp))).all()
+    # 趋势只展示最近 30 天，不再把全表时间戳载入内存做 Python 聚合。
+    trend_cutoff = (
+        datetime.now(timezone.utc) - timedelta(days=30)
+    ).isoformat(timespec="milliseconds").replace("+00:00", "Z")
+    all_timestamps = (await session.scalars(
+        select(m.LogEntry.timestamp).where(m.LogEntry.timestamp >= trend_cutoff)
+    )).all()
     notification_rows = (await session.scalars(select(m.Notification).order_by(m.Notification.timestamp.desc()))).all()
     export_rows = (await session.scalars(select(m.ExportTask).order_by(m.ExportTask.created_at.desc()))).all()
     chat_rows = (await session.scalars(select(m.ChatMessage).order_by(m.ChatMessage.timestamp.asc()))).all()
@@ -142,17 +153,27 @@ async def build_workspace(session: AsyncSession) -> dict[str, Any]:
 
     return {
         "agents": [row_dict(row, drop={"version"}, extra={"mounts": mounts_by_agent[row.id]}) for row in agent_rows],
-        "models": [row_dict(row, rename={"headers_enc": "headers"}) for row in model_rows],
+        "models": [
+            row_dict(row, drop={"headers_enc"}, extra={"headers": "", "headersConfigured": bool(row.headers_enc)})
+            for row in model_rows
+        ],
         "publications": [
             row_dict(row, drop={"headers_enc"}, extra={"headersConfigured": bool(row.headers_enc)})
             for row in publication_rows
         ],
+        # bootstrap 不下发解密后的 headers/env，也不下发 Fernet 密文；
+        # 服务端内部调用时按需 read_headers 解密，界面用 *Configured 表示已配置。
         "mcps": [
             row_dict(
                 row,
-                rename={"headers_enc": "headers"},
-                drop={"env_enc"},
-                extra={"env": decrypted_env(row.env_enc), "tools": tools_by_server[row.id]},
+                drop={"headers_enc", "env_enc"},
+                extra={
+                    "headers": "",
+                    "env": "",
+                    "headersConfigured": bool(row.headers_enc),
+                    "envConfigured": bool(row.env_enc),
+                    "tools": tools_by_server[row.id],
+                },
             )
             for row in mcp_rows
         ],

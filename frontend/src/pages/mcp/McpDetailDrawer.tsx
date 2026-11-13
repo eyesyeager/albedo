@@ -22,12 +22,22 @@ export function McpDetailDrawer({ mcpId, initialTab, onClose, onDelete }: { mcpI
   const [form, setForm] = useState({ name: '', description: '', endpoint: '', env: '', enabled: true })
   const [qpm, setQpm] = useState(defaults.qpm)
   const [concurrency, setConcurrency] = useState(defaults.maxConcurrency)
-  const [saving, setSaving] = useState(false)
+  // 通用保存、用量保存、连接测试各自独立 pending，避免任一请求结束提前解锁其它按钮。
+  const [pending, setPending] = useState<Record<string, boolean>>({})
   const [confirmDisable, setConfirmDisable] = useState(false)
   const [testingConnection, setTestingConnection] = useState(false)
   const [connectionResult, setConnectionResult] = useState<{ toolCount: number; latencyMs: number; at: string } | null>(null)
   const [connectionError, setConnectionError] = useState('')
   const [toolTestId, setToolTestId] = useState<string | null>(null)
+
+  const isBusy = (key: string): boolean => Boolean(pending[key])
+  const runAction = (key: string, action: () => Promise<unknown>): void => {
+    if (pending[key]) return
+    setPending((current) => ({ ...current, [key]: true }))
+    action()
+      .catch((reason: unknown) => toast.error(asError(reason).message))
+      .finally(() => setPending((current) => ({ ...current, [key]: false })))
+  }
 
   useEffect(() => setTab(initialTab), [mcpId, initialTab])
   useEffect(() => {
@@ -48,21 +58,14 @@ export function McpDetailDrawer({ mcpId, initialTab, onClose, onDelete }: { mcpI
 
   const affected = affectedAgents(data, 'mcp', mcp.id)
 
-  const performSave = () => {
-    setSaving(true)
+  const performSave = () => runAction('save', () =>
     api.mcp
       .update(mcp.id, { name: form.name, description: form.description, endpoint: form.endpoint, env: form.env })
       .then(() => (form.enabled !== mcp.enabled ? api.mcp.toggle(mcp.id, form.enabled) : undefined))
       .then(() => {
         toast.success(form.enabled !== mcp.enabled ? `MCP 已${form.enabled ? '启用' : '停用'}，配置已保存` : 'MCP 配置已保存')
-      })
-      .catch((reason: unknown) => {
-        const message = asError(reason).message
-        console.error('[albedo] 保存 MCP 配置失败：', message)
-        toast.error(message)
-      })
-      .finally(() => setSaving(false))
-  }
+      }),
+  )
 
   const saveGeneral = () => {
     if (mcp.enabled && !form.enabled) {
@@ -72,14 +75,11 @@ export function McpDetailDrawer({ mcpId, initialTab, onClose, onDelete }: { mcpI
     performSave()
   }
 
-  const saveUsage = () => {
-    setSaving(true)
+  const saveUsage = () => runAction('usage', () =>
     api.mcp
       .updateUsage(mcp.id, qpm, concurrency)
-      .then(() => toast.success('使用配置已保存'))
-      .catch((reason: unknown) => toast.error(asError(reason).message))
-      .finally(() => setSaving(false))
-  }
+      .then(() => toast.success('使用配置已保存')),
+  )
 
   const testConnection = () => {
     if (testingConnection) return
@@ -191,7 +191,7 @@ export function McpDetailDrawer({ mcpId, initialTab, onClose, onDelete }: { mcpI
             </div>
             <Switch label="启用 MCP" checked={form.enabled} onChange={(checked) => setForm({ ...form, enabled: checked })} />
           </div>
-          <Button block loading={saving} onClick={saveGeneral}>保存更改</Button>
+          <Button block loading={isBusy('save')} onClick={saveGeneral}>保存更改</Button>
         </div>
       )}
 
@@ -217,7 +217,9 @@ export function McpDetailDrawer({ mcpId, initialTab, onClose, onDelete }: { mcpI
                   label={`${tool.name} 启用开关`}
                   checked={tool.enabled}
                   onChange={(checked) => {
-                    api.mcp.toggleTool(mcp.id, tool.id, checked).then(() => toast.success(`工具「${tool.name}」已${checked ? '启用' : '停用'}`))
+                    api.mcp.toggleTool(mcp.id, tool.id, checked)
+                      .then(() => toast.success(`工具「${tool.name}」已${checked ? '启用' : '停用'}`))
+                      .catch((reason: unknown) => toast.error(asError(reason).message))
                   }}
                 />
               </div>
@@ -240,7 +242,7 @@ export function McpDetailDrawer({ mcpId, initialTab, onClose, onDelete }: { mcpI
             <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
             <span>超额请求进入短队列；超过服务超时时间（{mcp.timeoutSeconds} 秒）后返回限流或超时错误，并在调用日志中记录状态。</span>
           </div>
-          <Button block loading={saving} onClick={saveUsage}>保存使用配置</Button>
+          <Button block loading={isBusy('usage')} onClick={saveUsage}>保存使用配置</Button>
         </div>
       )}
 
@@ -287,6 +289,7 @@ export function McpDetailDrawer({ mcpId, initialTab, onClose, onDelete }: { mcpI
         description="停用后所有已挂载该 MCP 的智能体无法调用其工具，运行时会返回明确的资源不可用错误。"
         confirmText="确认停用"
         danger
+        loading={isBusy('save')}
         impacts={[
           `受影响智能体：${affected.length} 个${affected.length ? `（${affected.map((agent) => agent.name).join('、')}）` : ''}`,
           `当前可用工具：${mcp.tools.filter((tool) => tool.enabled).length} 个，停用后全部不可调用`,

@@ -1,0 +1,85 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: test-root
+          MYSQL_DATABASE: albedo_test
+        ports: ["3306:3306"]
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -uroot -ptest-root"
+          --health-interval=10s --health-timeout=5s --health-retries=20
+      redis:
+        image: redis:8-alpine
+        ports: ["6379:6379"]
+    env:
+      ENVIRONMENT: dev
+      DEMO_ACCESS_KEY: ci-only-not-a-real-key
+      REDIS_URL: redis://127.0.0.1:6379/0
+      ALBEDO_TEST_DATABASE_URL: mysql+aiomysql://root:test-root@127.0.0.1:3306/albedo_test
+      PYTHONPATH: .
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - name: Install backend deps
+        working-directory: backend
+        run: uv sync --frozen
+      - name: Reject tracked credentials and runtime artifacts
+        run: |
+          if git ls-files | grep -qE '(^|/)\.env$|cookies\.txt|(^|/)var/'; then
+            echo "发现被跟踪的凭据或运行时产物"
+            exit 1
+          fi
+      - name: Create isolated test schema
+        working-directory: backend
+        run: |
+          .venv/bin/python - <<'PY'
+          import asyncio
+          import os
+          from sqlalchemy.ext.asyncio import create_async_engine
+          from app.db.base import Base
+          import app.db.models  # noqa: F401
+
+          async def main():
+              engine = create_async_engine(os.environ["ALBEDO_TEST_DATABASE_URL"])
+              async with engine.begin() as conn:
+                  await conn.run_sync(Base.metadata.create_all)
+              await engine.dispose()
+
+          asyncio.run(main())
+          PY
+      - name: pytest (isolated database)
+        working-directory: backend
+        run: .venv/bin/python -m pytest -q
+      - name: Contract snapshot check
+        working-directory: backend
+        run: bash ../packages/contracts/generate.sh --check
+
+  frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - working-directory: frontend
+        run: npm ci
+      - working-directory: frontend
+        run: npm run typecheck && npm run build
+      - name: Runtime UI libraries are production dependencies
+        working-directory: frontend
+        run: |
+          npm ci --omit=dev
+          npm ls --omit=dev lucide-react recharts

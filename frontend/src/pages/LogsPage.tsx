@@ -51,13 +51,23 @@ export function LogsPage() {
   const [exporting, setExporting] = useState(false)
   const [serverResult, setServerResult] = useState<{ items: LogEntry[]; total: number; typeCounts: Record<string, number> } | null>(null)
   const [stats, setStats] = useState<OverviewStats | null>(null)
+  const [queryError, setQueryError] = useState<string | null>(null)
+  const [refetchKey, setRefetchKey] = useState(0)
 
   const effective = useMemo<LogFilters>(() => ({ ...filters, keyword: debouncedKeyword }), [filters, debouncedKeyword])
 
   useEffect(() => setPage(1), [debouncedKeyword, filters.type, filters.status, filters.range, filters.agentId])
 
+  // 日志被清理或筛选后 total 变小，避免停留在越界页码导致空白表格与「第 5 / 2 页」。
+  useEffect(() => {
+    if (!serverResult) return
+    const maxPage = Math.max(1, Math.ceil(serverResult.total / pageSize))
+    if (page > maxPage) setPage(maxPage)
+  }, [serverResult, page, pageSize])
+
   useEffect(() => {
     let canceled = false
+    setQueryError(null)
     adminApi.logs
       .query({
         page,
@@ -71,16 +81,22 @@ export function LogsPage() {
       .then((result) => {
         if (!canceled) setServerResult(result)
       })
-      .catch(() => {
-        if (!canceled) setServerResult(null)
+      .catch((reason: unknown) => {
+        if (canceled) return
+        setServerResult(null)
+        setQueryError(asError(reason).message)
       })
     return () => {
       canceled = true
     }
-  }, [page, pageSize, effective.keyword, effective.type, effective.status, effective.range, effective.agentId])
+  }, [page, pageSize, effective.keyword, effective.type, effective.status, effective.range, effective.agentId, refetchKey])
 
   useEffect(() => {
-    adminApi.stats.overview().then(setStats).catch(() => setStats(null))
+    let canceled = false
+    adminApi.stats.overview()
+      .then((value) => { if (!canceled) setStats(value) })
+      .catch(() => { if (!canceled) setStats(null) })
+    return () => { canceled = true }
   }, [data.logs.length])
 
   const shown = stats ?? EMPTY_STATS
@@ -260,7 +276,12 @@ export function LogsPage() {
           </div>
         )}
 
-        {total === 0 ? (
+        {queryError ? (
+          <div className="flex flex-col items-center gap-3 px-4 py-10 text-center">
+            <p className="text-sm text-ink">日志查询失败：{queryError}</p>
+            <Button variant="outline" onClick={() => setRefetchKey((value) => value + 1)}>重试</Button>
+          </div>
+        ) : total === 0 ? (
           <EmptyState title="没有找到匹配的日志" description="当前时间范围内没有记录，试着调整关键词、类型或筛选条件；当前筛选条件会保留。" />
         ) : (
           <div className="overflow-x-auto">

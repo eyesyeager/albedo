@@ -3,10 +3,11 @@ import { AlertTriangle, ArrowRight, Clock3 } from 'lucide-react'
 import { cn } from '../../lib/cn'
 import { formatDateTime, formatDuration, formatNumber } from '../../lib/format'
 import { adminApi } from '../../lib/api'
+import { asError } from '../../lib/errors'
 import { executionChain, LOG_SOURCE_LABEL, LOG_TYPE_LABEL } from '../../store/selectors'
 import { useWorkspace } from '../../store/workspace'
 import type { LogEntry } from '../../types/domain'
-import { Badge, CodeBlock, Drawer } from '../../components/ui'
+import { Badge, Button, CodeBlock, Drawer } from '../../components/ui'
 import { LogTypeIcon, RunStatusBadge } from '../../components/common/StatusBadge'
 
 function SummaryCell({ label, value, mono }: { label: string; value: string; mono?: boolean }) {
@@ -22,28 +23,55 @@ export function LogDetailDrawer({ logId, onClose }: { logId: string | null; onCl
   const data = useWorkspace()
   const local = logId ? data.logs.find((item) => item.logId === logId) : undefined
   const [remote, setRemote] = useState<(LogEntry & { chain: LogEntry[] }) | null>(null)
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [reloadKey, setReloadKey] = useState(0)
 
   useEffect(() => {
     if (!logId) {
       setRemote(null)
+      setError(null)
+      setLoading(false)
       return
     }
     let canceled = false
+    setRemote(null)
+    setError(null)
+    setLoading(true)
     adminApi.logs
       .detail(logId)
       .then((value) => {
         if (!canceled) setRemote(value)
       })
-      .catch(() => {
-        if (!canceled) setRemote(null)
+      .catch((reason: unknown) => {
+        if (!canceled) setError(asError(reason).message)
+      })
+      .finally(() => {
+        if (!canceled) setLoading(false)
       })
     return () => {
       canceled = true
     }
-  }, [logId, local])
+  }, [logId, reloadKey])
 
-  const log = local ?? remote
-  if (!log) return null
+  // 列表来自服务端分页，详情必须以远端结果为准；bootstrap 快照只作即时回退。
+  const log = remote ?? local
+  if (!logId) return null
+
+  if (!log) {
+    return (
+      <Drawer open onClose={onClose} title="日志详情" subtitle={logId} width="xl">
+        <div className="space-y-3">
+          <p className="text-sm text-ink-muted">
+            {loading ? '正在加载日志详情…' : error ? `加载失败：${error}` : '未找到该日志记录'}
+          </p>
+          {!loading && (
+            <Button variant="outline" onClick={() => setReloadKey((value) => value + 1)}>重试</Button>
+          )}
+        </div>
+      </Drawer>
+    )
+  }
 
   const chain = remote?.chain?.length ? remote.chain : executionChain(data.logs, log.runId)
   const firstTime = chain.length ? new Date(chain[0].timestamp).getTime() : new Date(log.timestamp).getTime()
@@ -110,7 +138,7 @@ export function LogDetailDrawer({ logId, onClose }: { logId: string | null; onCl
             <p className="mt-2 text-xs leading-relaxed text-ink">{log.errorMessage ?? log.summary}</p>
             <p className="mt-1.5 font-mono text-2xs text-danger">{log.errorCode ?? 'unknown_error'}</p>
             <p className="mt-2 flex items-center gap-1.5 text-2xs text-ink-muted">
-              <ArrowRight className="h-3 w-3" />排查建议：请检查上游服务状态与配额配置，并在调整后通过测试会话复现。
+              <ArrowRight className="h-3 w-3" />排查建议：请检查上游服务与配额配置，并在调整后通过测试会话复现。
             </p>
           </div>
         )}

@@ -46,11 +46,19 @@ export function OverviewPage() {
   const [trend, setTrend] = useState<TrendPoint[]>([])
 
   useEffect(() => {
-    adminApi.stats.overview().then(setStats).catch(() => setStats(null))
+    let canceled = false
+    adminApi.stats.overview()
+      .then((value) => { if (!canceled) setStats(value) })
+      .catch(() => { if (!canceled) setStats(null) })
+    return () => { canceled = true }
   }, [snapshot.logs.length])
 
   useEffect(() => {
-    adminApi.stats.trends(days).then(setTrend).catch(() => setTrend([]))
+    let canceled = false
+    adminApi.stats.trends(days)
+      .then((value) => { if (!canceled) setTrend(value) })
+      .catch(() => { if (!canceled) setTrend([]) })
+    return () => { canceled = true }
   }, [days, snapshot.logs.length])
 
   const shown = stats ?? EMPTY_STATS

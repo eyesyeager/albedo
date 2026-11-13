@@ -39,7 +39,7 @@ export function CreateModelDialog({ open, onClose }: { open: boolean; onClose: (
     setTestResult('')
     setError('')
     setKeyVisible(false)
-  }, [open, config])
+  }, [open])
 
   const update = (patch: Partial<ModelDraft>) => {
     setForm((current) => ({ ...current, ...patch }))

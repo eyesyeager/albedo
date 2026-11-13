@@ -2,7 +2,7 @@
 
 import logging
 
-from sqlalchemy import func, select, update
+from sqlalchemy import func, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.security import now_iso
@@ -43,18 +43,19 @@ async def record_tool_call(
         timestamp=now_iso(),
     ))
     await session.flush()
-    total = int((await session.scalar(
-        select(func.count()).select_from(m.McpCallRecord).where(m.McpCallRecord.server_id == resource_id)
-    )) or 0)
-    succeeded = int((await session.scalar(
-        select(func.count()).select_from(m.McpCallRecord).where(
-            m.McpCallRecord.server_id == resource_id, m.McpCallRecord.status == "success"
-        )
-    )) or 0)
+    # 原子增量 + SQL 侧加权平均：并发调用不再互相覆盖计数，也避免两次全表 COUNT。
+    success_value = 100.0 if status == "success" else 0.0
     await session.execute(
         update(m.McpServer)
         .where(m.McpServer.id == resource_id)
-        .values(call_count=total, success_rate=round(succeeded / total * 100, 2) if total else 0.0)
+        .values(
+            call_count=m.McpServer.call_count + 1,
+            success_rate=func.round(
+                (m.McpServer.success_rate * m.McpServer.call_count + success_value)
+                / (m.McpServer.call_count + 1),
+                2,
+            ),
+        )
     )
 
 

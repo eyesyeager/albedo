@@ -33,12 +33,32 @@ TEXT_SUFFIXES = {
     ".py", ".js", ".ts", ".tsx", ".html", ".htm", ".xml", ".sql", ".ini", ".toml", ".conf", ".sh",
 }
 IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg", ".webp", ".gif"}
-BANNED_MODULES = {
-    "subprocess", "socket", "socketserver", "ctypes", "multiprocessing", "pty", "fcntl", "resource",
-    "shutil", "http", "urllib", "urllib3", "requests", "httpx", "ftplib", "telnetlib", "smtplib",
-    "webbrowser", "pickle", "marshal", "importlib", "builtins", "os.system",
-}
-BANNED_CALLS = {"eval", "exec", "compile", "__import__", "execfile", "input"}
+# 白名单：只允许无文件系统 / 进程 / 网络副作用的计算类标准库模块。
+# 之前的黑名单不含 os、open、__globals__ 等逃逸路径，任何 Agent Token 持有者都能绕过，
+# 因此改为白名单；配合「默认关闭」与进程降权形成多层防护。
+ALLOWED_MODULES = frozenset({
+    "math", "cmath", "statistics", "decimal", "fractions", "numbers",
+    "json", "re", "string", "textwrap", "unicodedata",
+    "itertools", "functools", "operator", "collections", "heapq", "bisect",
+    "datetime", "calendar", "time", "random", "enum", "dataclasses", "typing",
+    "copy", "pprint", "uuid", "base64", "binascii", "hashlib",
+})
+# 危险内置名 / 模块名 / 反射入口：作为名称、调用目标或属性出现一律拒绝。
+BLOCKED_NAMES = frozenset({
+    "eval", "exec", "compile", "__import__", "execfile", "input", "breakpoint",
+    "open", "globals", "locals", "vars", "dir", "getattr", "setattr", "delattr",
+    "hasattr", "help", "memoryview", "super", "type", "object",
+    "os", "sys", "subprocess", "socket", "socketserver", "ctypes", "multiprocessing",
+    "threading", "signal", "pty", "fcntl", "resource", "shutil", "pathlib",
+    "tempfile", "io", "builtins", "importlib", "pickle", "marshal", "posix", "nt",
+    "site", "code", "codeop", "runpy", "pkgutil", "zipimport", "webbrowser",
+    "platform", "urllib", "urllib3", "requests", "httpx", "http", "ftplib",
+    "telnetlib", "smtplib", "codecs", "encodings",
+})
+# 不以 _ 开头但可用于逃逸的属性名。
+UNSAFE_ATTRIBUTES = frozenset({
+    "mro", "subclasses", "gi_frame", "cr_frame", "f_globals", "f_locals", "func_globals",
+})
 MAX_PARSE_CHARS = 20_000
 PREVIEW_CHARS = 2_000
 
@@ -207,7 +227,11 @@ async def run_web_search(query: str, max_results: int = 5) -> str:
 
 
 def check_code(code: str) -> str:
-    """静态检查：语法、危险模块与危险调用。返回空串表示通过。"""
+    """白名单静态检查：导入、名称、属性与字面量。返回空串表示通过。
+
+    注意：这只是纵深防御，不是 OS 级隔离。沙箱默认关闭，启用时必须配合
+    容器 / seccomp / 只读文件系统，否则不应在不可信输入下开启。
+    """
     try:
         tree = ast.parse(code)
     except SyntaxError as exc:
@@ -216,22 +240,41 @@ def check_code(code: str) -> str:
         if isinstance(node, ast.Import):
             for alias in node.names:
                 root = alias.name.split(".")[0]
-                if root in BANNED_MODULES:
-                    return f"禁止导入模块 {root}（代码执行沙箱不允许网络、进程与系统调用）"
+                if root not in ALLOWED_MODULES:
+                    return f"禁止导入模块 {root}（代码执行沙箱仅允许计算类标准库）"
         elif isinstance(node, ast.ImportFrom):
+            if node.level:
+                return "禁止相对导入（代码执行沙箱仅允许计算类标准库）"
             root = (node.module or "").split(".")[0]
-            if root in BANNED_MODULES:
-                return f"禁止导入模块 {root}（代码执行沙箱不允许网络、进程与系统调用）"
+            if root not in ALLOWED_MODULES:
+                return f"禁止导入模块 {root}（代码执行沙箱仅允许计算类标准库）"
+        elif isinstance(node, ast.Name):
+            if node.id in BLOCKED_NAMES:
+                return f"禁止使用 {node.id}（代码执行沙箱不允许动态执行与系统访问）"
+        elif isinstance(node, ast.Attribute):
+            attr = node.attr
+            if attr.startswith("_") or attr in UNSAFE_ATTRIBUTES or attr in BLOCKED_NAMES:
+                return f"禁止访问属性 {attr}（代码执行沙箱不允许反射与属性逃逸）"
         elif isinstance(node, ast.Call):
             func = node.func
             name = func.id if isinstance(func, ast.Name) else (func.attr if isinstance(func, ast.Attribute) else "")
-            if name in BANNED_CALLS:
-                return f"禁止调用 {name}（代码执行沙箱不允许动态执行）"
+            if name in BLOCKED_NAMES:
+                return f"禁止调用 {name}（代码执行沙箱不允许动态执行与系统访问）"
+        elif isinstance(node, ast.Constant) and isinstance(node.value, str) and "__" in node.value:
+            return "禁止包含双下划线字面量（可绕过属性检查的格式化字符串逃逸）"
     return ""
 
 
 def _limit_setter(cpu_seconds: int, memory_mb: int):
     def apply() -> None:
+        # 以 root 运行时降权到 nobody，缩小对宿主文件系统的可访问范围。
+        try:
+            if hasattr(os, "geteuid") and os.geteuid() == 0:
+                os.setgroups([])
+                os.setgid(65534)
+                os.setuid(65534)
+        except (OSError, AttributeError):
+            pass
         try:
             import resource
         except ImportError:  # 非 POSIX 平台
@@ -240,6 +283,7 @@ def _limit_setter(cpu_seconds: int, memory_mb: int):
             ("RLIMIT_CPU", (cpu_seconds + 1, cpu_seconds + 2)),
             ("RLIMIT_FSIZE", (8 * 1024 * 1024, 8 * 1024 * 1024)),
             ("RLIMIT_NPROC", (1, 1)),
+            ("RLIMIT_NOFILE", (64, 64)),
         ]
         if sys.platform.startswith("linux"):
             limits.append(("RLIMIT_AS", (memory_mb * 1024 * 1024, memory_mb * 1024 * 1024)))
@@ -343,8 +387,23 @@ async def run_skill_script(source: str, package: Path, members: list[str]) -> di
             extract_members(package, members, root)
         except ApiException as exc:
             return {"status": "error", "summary": exc.message, "stdout": "", "stderr": ""}
+        # 白名单禁止 open()，包内文本资源改由宿主预读并注入 RESOURCES。
+        # 脚本用 RESOURCES["相对路径"] 读取，不再具备任意文件读取能力。
+        resources: dict[str, str] = {}
+        for member in sorted(root.rglob("*")):
+            if not member.is_file() or member.name == "main.py":
+                continue
+            if member.suffix.lower() not in TEXT_SUFFIXES:
+                continue
+            try:
+                resources[str(member.relative_to(root))] = member.read_text(encoding="utf-8")[:MAX_PARSE_CHARS]
+            except (OSError, UnicodeDecodeError):
+                continue
         script = root / "main.py"
-        script.write_text(source, encoding="utf-8")
+        script.write_text(
+            "RESOURCES = " + json.dumps(resources, ensure_ascii=False) + "\n" + source,
+            encoding="utf-8",
+        )
         env = {
             "PATH": "/usr/bin:/bin:/usr/local/bin",
             "HOME": workdir,

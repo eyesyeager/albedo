@@ -3,6 +3,7 @@ from typing import Any
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
+from sqlalchemy.exc import IntegrityError
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.core.logging import get_request_id
@@ -59,4 +60,12 @@ def install_error_handlers(app: FastAPI) -> None:
         return JSONResponse(
             status_code=exc.status_code,
             content=error_body(code, detail, get_request_id()),
+        )
+
+    @app.exception_handler(IntegrityError)
+    async def integrity_error_handler(_: Request, _exc: IntegrityError) -> JSONResponse:
+        # check-then-insert 竞态撞唯一约束时应返回 409，而不是未捕获的 500。
+        return JSONResponse(
+            status_code=409,
+            content=error_body("conflict", "资源冲突：唯一约束或关联数据已被占用，请刷新后重试", get_request_id()),
         )

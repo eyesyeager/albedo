@@ -31,7 +31,7 @@ import type {
 import { useAuth } from '../store/auth'
 import { useWorkspace } from '../store/workspace'
 import { ApiError } from './errors'
-import { http, httpBlob, hydrate, jsonBody, openEventStream, replaceFromServer, fetchSession, fetchBootstrap } from './http'
+import { http, httpBlob, hydrate, jsonBody, openEventStream, replaceFromServer, fetchSession, fetchBootstrap, clearSessionState } from './http'
 import { readSse } from './sse'
 
 interface WriteResponse<T> {
@@ -98,14 +98,19 @@ export const api = {
   auth: {
     async login(key: string): Promise<void> {
       const response = await post<{ authenticated: boolean; log?: LogEntry }>('/auth/login', { key })
+      // 登录做成事务：快照加载成功后才置登录态，失败时整体保持未登录。
+      await replaceFromServer()
       useAuth.getState().setAuthenticated(true)
       syncLog(response.log)
-      await replaceFromServer()
     },
     async logout(): Promise<void> {
-      const response = await post<{ ok: boolean; log?: LogEntry }>('/auth/logout')
-      useAuth.getState().logout()
-      syncLog(response.log)
+      // 先同步清空全局工作区，网络失败也不残留上一会话的密钥后缀、日志与聊天记录。
+      clearSessionState()
+      try {
+        await post<{ ok: boolean; log?: LogEntry }>('/auth/logout')
+      } catch (error) {
+        console.warn('[albedo] 退出登录请求失败，本地会话已清除：', error)
+      }
     },
   },
 
@@ -319,7 +324,7 @@ export const api = {
       }
       syncLog(response.log)
       syncLogs(response.logs)
-      if (safe.retentionDays !== undefined) await replaceFromServer()
+      // 服务端已返回最新 settings；不再全量重拉快照，避免较慢的旧快照覆盖期间的局部写操作。
     },
     async changeAccessKey(draft: AccessKeyDraft): Promise<void> {
       const response = await post<WriteResponse<never>>('/settings/access-key', draft)
@@ -383,7 +388,7 @@ export const api = {
       return { messages, runId: response.runId, threadId: response.threadId }
     },
     /** 流式测试会话：先本地占位渲染增量 token，run.finished 时用服务端权威消息替换。 */
-    async stream(agentId: string, content: string, modelId: string): Promise<SendResult> {
+    async stream(agentId: string, content: string, modelId: string, signal?: AbortSignal): Promise<SendResult> {
       const stamp = (): string => new Date().toISOString()
       const pendingIds: string[] = []
       const userId = `tmp-user-${Date.now()}`
@@ -420,6 +425,7 @@ export const api = {
         headers: { Accept: 'text/event-stream' },
         body: jsonBody({ content, testModelId: modelId }),
         timeoutMs,
+        signal,
       })
 
       let streamError: unknown = null
@@ -430,6 +436,7 @@ export const api = {
             try {
               payload = JSON.parse(data) as Record<string, unknown>
             } catch {
+              console.warn('[albedo] 忽略格式非法的 SSE 帧：', event, data.slice(0, 120))
               return
             }
           }
@@ -510,7 +517,11 @@ export const api = {
         handle.close()
       }
 
-      if (!finished) closeBubble()
+      if (!finished) {
+        closeBubble()
+        // 流中断 / 超时 / 未收到终态：删除所有本地占位气泡，避免 tmp-* 永久残留。
+        state().dropChatMessages(agentId, pendingIds)
+      }
       if (streamError) {
         if (streamError instanceof ApiError) throw streamError
         if (streamError instanceof DOMException && streamError.name === 'AbortError') {

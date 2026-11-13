@@ -1,9 +1,14 @@
+import re
 from datetime import datetime, timezone
-
-from jinja2 import StrictUndefined, Template
 
 from app.core.errors import ApiException
 from app.services.agent_rules import extract_variables
+
+# 提示词模板只支持 {{变量名}}，与 agent_rules.VARIABLE_PATTERN 完全一致。
+# 这里刻意不执行 Jinja2 模板：任何模板引擎都会把管理员可控的 systemPrompt
+# 变成可执行表达式（SSTI / 属性逃逸 / RCE），而产品只需要简单的变量替换。
+_VARIABLE_TAG = re.compile(r"\{\{\s*([A-Za-z_][A-Za-z0-9_]*)\s*\}\}")
+_ANY_TAG = re.compile(r"\{\{.*?\}\}", re.S)
 
 
 def now_iso() -> str:
@@ -53,8 +58,16 @@ def render_system_prompt(
     if strict and not_provided:
         raise ApiException("missing_variable", f"缺少提示词必需变量：{', '.join(not_provided)}", 422)
 
+    # 任何非简单变量的 {{ ... }} / {% ... %} 都直接拒绝，避免表达式被当作模板执行。
+    if len(_ANY_TAG.findall(template_text)) != len(_VARIABLE_TAG.findall(template_text)) or "{%" in template_text:
+        raise ApiException(
+            "validation_error",
+            "提示词模板仅支持 {{变量名}} 形式，不支持表达式、过滤器或控制语句",
+            400,
+        )
+
     render_values = {name: values.get(name, "") for name in set(required) | {"currentTime"}}
-    rendered = Template(template_text, undefined=StrictUndefined).render(**render_values)
+    rendered = _VARIABLE_TAG.sub(lambda match: str(render_values.get(match.group(1), "")), template_text)
     catalog = skill_catalog_block(snapshot)
     if catalog:
         rendered = f"{rendered}\n{catalog}" if rendered.strip() else catalog.lstrip("\n")

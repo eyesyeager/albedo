@@ -184,7 +184,6 @@ def default_system_config() -> dict[str, Any]:
             "http_allow_hosts": settings.http_allow_hosts,
             "http_timeout_seconds": settings.http_timeout_seconds,
             "http_max_response_bytes": settings.http_max_response_bytes,
-            "sandbox_enabled": settings.sandbox_enabled,
             "sandbox_timeout_seconds": settings.sandbox_timeout_seconds,
             "sandbox_memory_mb": settings.sandbox_memory_mb,
             "sandbox_max_output_chars": settings.sandbox_max_output_chars,

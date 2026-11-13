@@ -3,12 +3,13 @@ from urllib.parse import unquote, urlparse
 
 from arq import cron
 from arq.connections import RedisSettings
-from sqlalchemy import delete, update
+from sqlalchemy import update
 
 from app.core.config import get_settings
 from app.db import models as m
 from app.db.session import SessionLocal, dispose_engine
 from app.services.audit import audit
+from app.services.log_retention import prune_logs
 
 _settings = get_settings()
 _parsed = urlparse(_settings.redis_url)
@@ -22,17 +23,20 @@ async def cleanup_logs(ctx) -> dict:
     async with SessionLocal() as db:
         workspace = await db.get(m.WorkspaceSetting, 1)
         retention_days = workspace.retention_days if workspace else 90
-        cutoff = _iso(datetime.now(timezone.utc) - timedelta(days=retention_days))
-        result = await db.execute(delete(m.LogEntry).where(m.LogEntry.timestamp < cutoff))
-        removed = int(result.rowcount or 0)
-        await db.execute(update(m.ExportTask).where(m.ExportTask.expires_at < _iso(datetime.now(timezone.utc))).values(status="expired"))
+        result = await prune_logs(db, retention_days)
+        await db.execute(
+            update(m.ExportTask)
+            .where(m.ExportTask.expires_at < _iso(datetime.now(timezone.utc)))
+            .values(status="expired")
+        )
         await audit(
             db,
             "执行日志清理任务",
-            f"按 {retention_days} 天周期清理 {removed} 条过期日志，任务完成且可审计",
+            f"按 {retention_days} 天周期分批清理 {result['deleted']} 条过期日志，"
+            f"归档 {result['archive'] or '无'}，任务完成且可审计",
         )
         await db.commit()
-    return {"deleted": removed}
+    return {"deleted": result["deleted"], "archive": result["archive"]}
 
 
 async def shutdown(ctx) -> None:

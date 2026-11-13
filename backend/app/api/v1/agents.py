@@ -24,7 +24,7 @@ from app.schemas.requests import AgentDraft, AgentPatch, ProtocolPatch, TestRunR
 from app.schemas.responses import CredentialView, WriteResponse
 from app.services.agent_rules import extract_variables, publish_issues, replace_mounts, validate_variables
 from app.services.common import agent_to_dict, commit_write, get_or_404, reveal_credential, store_credential, validate_name
-from app.services.runtime_snapshot import build_runtime_snapshot
+from app.services.runtime_snapshot import build_runtime_snapshot, safe_snapshot
 from app.services.snapshot import row_dict
 from app.services.system_config import get_configs
 
@@ -154,23 +154,20 @@ async def update_agent(
     updates.pop("version", None)
     if mounts is not None:
         await replace_mounts(db, agent_id, mounts)
-    if expected is not None:
-        values = {**updates, "version": m.Agent.version + 1, "updated_at": now_iso()}
-        result = await db.execute(
-            update(m.Agent)
-            .where(m.Agent.id == agent_id, m.Agent.version == expected)
-            .values(**values)
-        )
-        if result.rowcount == 0:
-            raise ApiException("stale_version", "配置已被其他标签页更新，请刷新后比较再保存", 409)
-        await db.commit()
-        await db.refresh(row)
-    else:
-        for column, value in updates.items():
-            setattr(row, column, value)
-        row.version += 1
-        row.updated_at = now_iso()
-        await db.flush()
+    # 无论调用方是否传 expectedVersion，写库都带 WHERE version 的 CAS；
+    # 未提供时用本次读取到的版本，避免并发保存静默互相覆盖。
+    baseline = expected if expected is not None else row.version
+    values = {**updates, "version": m.Agent.version + 1, "updated_at": now_iso()}
+    result = await db.execute(
+        update(m.Agent)
+        .where(m.Agent.id == agent_id, m.Agent.version == baseline)
+        .values(**values)
+    )
+    if result.rowcount == 0:
+        await db.rollback()
+        raise ApiException("stale_version", "配置已被其他标签页更新，请刷新后比较再保存", 409)
+    await db.flush()
+    await db.refresh(row)
     entity = await agent_to_dict(db, row)
     return await commit_write(
         db, entity, "保存智能体配置", f"更新智能体 {agent_id} 的配置",
@@ -214,13 +211,20 @@ async def set_protocol(
     row = await get_or_404(db, m.Agent, agent_id)
     if payload.enabled:
         _assert_publishable(await publish_issues(db, row))
-    if payload.protocol == "api":
-        row.api_enabled = payload.enabled
-    else:
-        row.agui_enabled = payload.enabled
-    row.version += 1
-    row.updated_at = now_iso()
-    await db.flush()
+    baseline = row.version
+    result = await db.execute(
+        update(m.Agent)
+        .where(m.Agent.id == agent_id, m.Agent.version == baseline)
+        .values(**{
+            "api_enabled" if payload.protocol == "api" else "agui_enabled": payload.enabled,
+            "version": m.Agent.version + 1,
+            "updated_at": now_iso(),
+        })
+    )
+    if result.rowcount == 0:
+        await db.rollback()
+        raise ApiException("stale_version", "配置已被其他标签页更新，请刷新后重试", 409)
+    await db.refresh(row)
     entity = await agent_to_dict(db, row)
     label = "标准对话 API" if payload.protocol == "api" else "AGUI 协议接口"
     return await commit_write(
@@ -239,11 +243,17 @@ async def reset_credential(
     row = await get_or_404(db, m.Agent, agent_id)
     full_key = f"alb_agt_{secrets.token_urlsafe(24)}"
     suffix = suffix_of(full_key)
-    row.credential_suffix = suffix
-    row.version += 1
-    row.updated_at = now_iso()
+    baseline = row.version
+    result = await db.execute(
+        update(m.Agent)
+        .where(m.Agent.id == agent_id, m.Agent.version == baseline)
+        .values(credential_suffix=suffix, version=m.Agent.version + 1, updated_at=now_iso())
+    )
+    if result.rowcount == 0:
+        await db.rollback()
+        raise ApiException("stale_version", "配置已被其他标签页更新，请刷新后重试", 409)
     await store_credential(db, "agent_token", agent_id, full_key, suffix)
-    await db.flush()
+    await db.refresh(row)
     return await commit_write(
         db, await agent_to_dict(db, row), "重置 Agent 访问凭证",
         f"智能体 {agent_id} 的旧密钥立即失效，新后缀 {suffix}",
@@ -461,7 +471,7 @@ async def test_run(
         agent_id=agent_id,
         source="test_session",
         status="completed" if result.finish_reason != "timeout" else "timeout",
-        config_snapshot=snapshot,
+        config_snapshot=safe_snapshot(snapshot),
         finish_reason=result.finish_reason,
         usage=result.usage,
         duration_ms=result.duration_ms,
@@ -504,7 +514,7 @@ async def clear_test_session(
     engine = get_runtime_engine()
     cleared = 0
     for thread_id in sorted(session_threads):
-        await engine.clear_thread(thread_id)
+        await engine.clear_thread(thread_id, agent_id)
         cleared += 1
     await db.commit()
     return {"ok": True, "clearedThreads": cleared}

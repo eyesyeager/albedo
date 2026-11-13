@@ -9,11 +9,9 @@ from app.db import models as m
 from app.db.session import get_db
 from app.schemas.domain import OverviewStats, SearchResult, TrendPoint, normalize_log_type
 from app.services.system_config import get_configs
-from app.services.trends import build_trend_points, local_date
+from app.services.trends import build_trend_points, local_date, today_local
 
 router = APIRouter(tags=["stats"])
-
-LOCAL_TZ = timezone(timedelta(hours=8))
 
 
 @router.get("/stats/overview", response_model=OverviewStats, summary="概览指标")
@@ -31,8 +29,8 @@ async def overview(
     ended = [log for log in recent if log.status != "running"]
     succeeded = sum(1 for log in ended if log.status == "success")
     durations = [log.duration_ms for log in recent if log.duration_ms is not None]
-    today = datetime.now(LOCAL_TZ).strftime("%Y-%m-%d")
-    yesterday = (datetime.now(LOCAL_TZ) - timedelta(days=1)).strftime("%Y-%m-%d")
+    today = today_local().strftime("%Y-%m-%d")
+    yesterday = (today_local() - timedelta(days=1)).strftime("%Y-%m-%d")
     today_calls = sum(1 for log in logs if local_date(log.timestamp) == today)
     yesterday_calls = sum(1 for log in logs if local_date(log.timestamp) == yesterday)
 

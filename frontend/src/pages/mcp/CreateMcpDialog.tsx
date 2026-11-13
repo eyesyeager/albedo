@@ -35,7 +35,7 @@ export function CreateMcpDialog({ open, onClose }: { open: boolean; onClose: () 
     setTestResult('')
     setTestTools([])
     setError('')
-  }, [open, config])
+  }, [open])
 
   const update = (patch: Partial<McpDraft>) => {
     setForm((current) => ({ ...current, ...patch, tested: false }))

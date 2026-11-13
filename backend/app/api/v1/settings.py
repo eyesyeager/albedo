@@ -5,7 +5,7 @@ from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import current_session
-from app.api.v1.logs import prune_logs
+from app.services.log_retention import clamp_retention_days, prune_logs
 from app.core.errors import ApiException
 from app.core.security import encrypt_secret, hash_secret, now_iso, suffix_of, verify_secret
 from app.db import models as m
@@ -66,6 +66,8 @@ async def update_settings(
     if row is None:
         raise ApiException("resource_not_found", "工作区设置未初始化", 404)
     patch = payload.model_dump(exclude_unset=True)
+    if patch.get("retentionDays") is not None:
+        patch["retentionDays"] = clamp_retention_days(patch["retentionDays"])
     updates = to_row(patch, m.WorkspaceSetting)
     for column, value in updates.items():
         setattr(row, column, value)
@@ -74,14 +76,14 @@ async def update_settings(
     main_log = await audit(db, "更新工作区设置", "常规设置与治理策略已保存")
     extra_logs = []
     if "retention_days" in updates:
-        removed = await prune_logs(db, row.retention_days)
+        result = await prune_logs(db, row.retention_days)
         extra_logs.append(await audit(
             db, "更新日志保留策略",
-            f"日志保留周期调整为 {row.retention_days} 天，自动归档{'已开启' if row.auto_archive else '已关闭'}",
+            f"日志保留周期调整为 {row.retention_days} 天；清理前已将 {result['deleted']} 条日志脱敏归档到 {result['archive'] or '无'}",
         ))
         extra_logs.append(await audit(
             db, "执行日志清理任务",
-            f"按 {row.retention_days} 天周期清理 {removed} 条过期日志，任务完成且可审计",
+            f"按 {row.retention_days} 天周期分批清理 {result['deleted']} 条过期日志，任务完成且可审计",
         ))
     await db.commit()
     logs = extra_logs or [main_log]

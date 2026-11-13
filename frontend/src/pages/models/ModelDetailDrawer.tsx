@@ -144,7 +144,9 @@ export function ModelDetailDrawer({ modelId, onClose, onPublish }: { modelId: st
                     <code className="font-mono text-xs font-semibold text-ink">{version.version}</code>
                     <Badge tone={version.enabled ? 'ok' : 'neutral'} dot>{version.enabled ? '已发布' : '已停用'}</Badge>
                     <div className="ml-auto"><Switch label={`${version.version} 启用开关`} checked={version.enabled} onChange={(checked) => {
-                      api.models.togglePublication(version.id, checked).then(() => toast.success(`${version.version} 已${checked ? '启用' : '停用'}`))
+                      api.models.togglePublication(version.id, checked)
+                        .then(() => toast.success(`${version.version} 已${checked ? '启用' : '停用'}`))
+                        .catch((reason: unknown) => toast.error(asError(reason).message))
                     }} /></div>
                   </div>
                   <div className="mt-2 flex items-center gap-2">

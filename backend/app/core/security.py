@@ -6,7 +6,7 @@ from datetime import datetime, timedelta, timezone
 
 from argon2 import PasswordHasher
 from argon2.exceptions import VerifyMismatchError
-from cryptography.fernet import Fernet, InvalidToken
+from cryptography.fernet import Fernet, InvalidToken, MultiFernet
 
 from app.core.config import get_settings
 
@@ -54,11 +54,11 @@ def new_session_id() -> str:
     return secrets.token_urlsafe(32)
 
 
-def _fernet() -> Fernet:
-    key = get_settings().fernet_key
-    if not key:
+def _fernet() -> MultiFernet:
+    keys = get_settings().fernet_keys
+    if not keys:
         raise RuntimeError("SECRET_KEY is not configured")
-    return Fernet(key)
+    return MultiFernet([Fernet(key) for key in keys])
 
 
 def encrypt_secret(value: str) -> str:
@@ -68,5 +68,13 @@ def encrypt_secret(value: str) -> str:
 def decrypt_secret(value: str) -> str | None:
     try:
         return _fernet().decrypt(value.encode()).decode()
+    except (InvalidToken, ValueError):
+        return None
+
+
+def rotate_secret(value: str) -> str | None:
+    """把用旧密钥加密的密文重加密为当前密钥；无法解密时返回 None。"""
+    try:
+        return _fernet().rotate(value.encode()).decode()
     except (InvalidToken, ValueError):
         return None

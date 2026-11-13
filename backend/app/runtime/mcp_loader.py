@@ -11,8 +11,10 @@ import hashlib
 import json
 import logging
 import shlex
+import shutil
 import time
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 
 from langchain_core.tools import BaseTool, ToolException
@@ -21,6 +23,7 @@ from langchain_mcp_adapters.tools import load_mcp_tools
 from mcp.client.stdio import get_default_environment
 from pydantic import ValidationError
 
+from app.core.config import get_settings
 from app.core.errors import ApiException
 from app.core.network import assert_public_url
 from app.core.ratelimit import allow_qpm
@@ -82,18 +85,60 @@ def mcp_output_error(value: Any) -> str | None:
     return None
 
 
+STDIO_PATH = "/usr/bin:/bin:/usr/local/bin"
+# 这些环境变量可劫持子进程的加载路径或启动脚本，禁止由 MCP 配置覆盖。
+FORBIDDEN_ENV_KEYS = frozenset({
+    "PATH", "HOME", "SHELL", "IFS", "LD_PRELOAD", "LD_LIBRARY_PATH",
+    "DYLD_INSERT_LIBRARIES", "DYLD_LIBRARY_PATH", "PYTHONPATH",
+    "PYTHONSTARTUP", "PYTHONHOME", "BASH_ENV", "ENV", "CDPATH",
+    "NODE_OPTIONS", "JAVA_TOOL_OPTIONS",
+})
+
+
+def validate_stdio_command(endpoint: Any, env: Any = None) -> tuple[str, list[str], dict[str, str]]:
+    """校验 stdio MCP 启动命令：默认禁用，启用后只允许部署期白名单里的可执行文件名。"""
+    settings = get_settings()
+    if not settings.mcp_stdio_enabled:
+        raise ApiException(
+            "validation_error",
+            "stdio MCP 已在服务端禁用：请使用 HTTP/SSE 接入，或由部署方开启 MCP_STDIO_ENABLED 并配置命令白名单",
+            400,
+        )
+    allowed = {item.strip() for item in settings.mcp_stdio_allowed_commands.split(",") if item.strip()}
+    if not allowed:
+        raise ApiException("validation_error", "未配置 MCP_STDIO_ALLOWED_COMMANDS 白名单，stdio MCP 不可用", 400)
+    try:
+        parts = shlex.split(str(endpoint or ""))
+    except ValueError as exc:
+        raise ApiException("validation_error", "stdio 启动命令格式不合法", 400) from exc
+    if not parts:
+        raise ApiException("validation_error", "stdio MCP 缺少启动命令", 400)
+    command = parts[0]
+    # 只允许纯文件名，杜绝绝对/相对路径；再按固定 PATH 解析成绝对路径，
+    # 避免 PATH 顺序或环境变量把命令指向攻击者放置的程序。
+    if Path(command).name != command or command not in allowed:
+        raise ApiException("validation_error", f"命令 {command!r} 不在允许列表内", 400)
+    resolved = shutil.which(command, path=STDIO_PATH)
+    if not resolved:
+        raise ApiException("validation_error", f"命令 {command!r} 未在 {STDIO_PATH} 中找到", 400)
+    extra = parse_json_object(env)
+    forbidden = {key for key in extra if str(key).upper() in FORBIDDEN_ENV_KEYS}
+    if forbidden:
+        raise ApiException("validation_error", f"stdio 环境变量包含被禁止的键：{', '.join(sorted(forbidden))}", 400)
+    return resolved, parts[1:], extra
+
+
 def build_connection(server: dict[str, Any]) -> dict[str, Any]:
     transport = str(server.get("transport") or "streamable_http")
     if transport == "stdio":
-        parts = shlex.split(str(server.get("endpoint") or ""))
-        if not parts:
-            raise ValueError("stdio MCP 缺少启动命令")
-        connection: dict[str, Any] = {"transport": "stdio", "command": parts[0], "args": parts[1:]}
-        env = parse_json_object(server.get("env"))
-        if env:
-            # 只传用户显式声明的变量 + 运行所需的最小环境，避免把整个进程环境泄露给子进程。
-            connection["env"] = {**get_default_environment(), **env}
-        return connection
+        command, args, extra = validate_stdio_command(server.get("endpoint"), server.get("env"))
+        # 固定 PATH，只叠加经白名单过滤的用户变量，避免整个进程环境泄露给子进程。
+        return {
+            "transport": "stdio",
+            "command": command,
+            "args": args,
+            "env": {**get_default_environment(), **extra, "PATH": STDIO_PATH},
+        }
     headers = parse_json_object(server.get("headers"))
     return {
         "transport": TRANSPORTS.get(transport, "streamable_http"),

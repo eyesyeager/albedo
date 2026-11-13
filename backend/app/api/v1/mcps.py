@@ -8,7 +8,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.adapters.gateway import McpGateway
 from app.api.deps import current_session
 from app.core.errors import ApiException
+from app.core.network import assert_public_url
 from app.core.security import new_id, now_iso, suffix_of
+from app.runtime.mcp_loader import validate_stdio_command
 from app.db import models as m
 from app.db.seed import to_row
 from app.db.session import get_db
@@ -194,6 +196,8 @@ async def create_mcp(
     endpoint = validate_blank(payload.endpoint, "服务地址/命令不能为空")
     validate_json_object(payload.headers)
     validate_json_object(payload.env, "stdio 环境变量必须是合法的 JSON 对象")
+    if str(getattr(payload, "transport", "") or "streamable_http") != "stdio":
+        await assert_public_url(endpoint)
     config = await get_configs(db)
     defaults = config["defaults"]["mcp"]
     tools = await McpGateway().discover_tools(payload.model_dump())
@@ -280,15 +284,30 @@ async def update_mcp(
         validate_blank(patch["name"], "名称与服务地址不能为空")
     if "endpoint" in patch:
         validate_blank(patch["endpoint"], "名称与服务地址不能为空")
+    # transport 可以单独从 HTTP 改成 stdio，因此按「最终生效值」校验，而不是只看本次 patch。
+    final_transport = str(patch.get("transport") or row.transport or "")
+    final_endpoint = str(patch.get("endpoint") if patch.get("endpoint") is not None else row.endpoint or "")
+    final_env = patch.get("env") if "env" in patch else read_headers(row.env_enc)
+    if final_transport == "stdio":
+        validate_stdio_command(final_endpoint, final_env)
+    elif "endpoint" in patch:
+        await assert_public_url(final_endpoint)
     if "headers" in patch:
         validate_json_object(patch["headers"])
     if "env" in patch:
         validate_json_object(patch["env"], "stdio 环境变量必须是合法的 JSON 对象")
     updates = to_row(patch, m.McpServer, aliases={"headers": "headers_enc", "env": "env_enc"})
+    # 常规接口只下发空串；留空表示「不修改」，避免覆盖已加密的请求头与环境变量。
     if "headers" in patch:
-        updates["headers_enc"] = write_headers(patch["headers"])
+        if str(patch["headers"]).strip():
+            updates["headers_enc"] = write_headers(patch["headers"])
+        else:
+            updates.pop("headers_enc", None)
     if "env" in patch:
-        updates["env_enc"] = write_headers(patch["env"])
+        if str(patch["env"]).strip():
+            updates["env_enc"] = write_headers(patch["env"])
+        else:
+            updates.pop("env_enc", None)
     for column, value in updates.items():
         setattr(row, column, value)
     row.updated_at = now_iso()

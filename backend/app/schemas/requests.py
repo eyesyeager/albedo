@@ -144,7 +144,7 @@ class SettingsPatch(PatchModel):
     domain: str | None = None
     telemetry: bool | None = None
     autoArchive: bool | None = None
-    retentionDays: int | None = None
+    retentionDays: int | None = Field(default=None, ge=1, le=365)
 
 
 class ExportRequest(PatchModel):

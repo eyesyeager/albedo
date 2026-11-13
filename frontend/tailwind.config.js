@@ -15,8 +15,8 @@ export default {
         },
         ink: {
           DEFAULT: '#1B1D26',
-          muted: '#6B7280',
-          faint: '#9CA3AF',
+          muted: '#4B5563',
+          faint: '#6B7280',
         },
         canvas: '#F7F8FA',
         sidebar: {

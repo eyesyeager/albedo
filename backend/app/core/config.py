@@ -1,3 +1,5 @@
+import base64
+import hashlib
 import logging
 from functools import lru_cache
 from pathlib import Path
@@ -10,7 +12,7 @@ BACKEND_ROOT = Path(__file__).resolve().parents[2]
 
 logger = logging.getLogger(__name__)
 
-# 公开文档中曾出现过的弱凭据黑名单，仅用于生产环境启动校验。
+# 公开文档中曾出现过的弱凭据黑名单，用于生产环境启动校验与登录态检查。
 PUBLIC_DEMO_KEYS = frozenset({"albedo-demo-2026"})
 PLACEHOLDER_DSN = "mysql+aiomysql://USER:URL_ENCODED_PASSWORD@HOST:PORT/albedo"
 LOCAL_CORS_ORIGINS = (
@@ -18,6 +20,35 @@ LOCAL_CORS_ORIGINS = (
     "http://localhost:5174,http://127.0.0.1:5174,"
     "http://localhost:5175,http://127.0.0.1:5175"
 )
+_DEV_KEY_PATH = BACKEND_ROOT / "var" / ".dev-secret-key"
+
+
+def is_public_demo_key(value: str) -> bool:
+    """规范化后比较，避免大小写 / 首尾空白变体绕过黑名单。"""
+    return value.strip().casefold() in {key.casefold() for key in PUBLIC_DEMO_KEYS}
+
+
+def _derive_data_key(raw: bytes, version: str = "v1") -> bytes:
+    digest = hashlib.sha256(b"albedo:data-encryption:" + version.encode() + b"\0" + raw).digest()
+    return base64.urlsafe_b64encode(digest)
+
+
+def _persistent_dev_key() -> str:
+    """dev 模式使用固定本地密钥文件，避免每次重启随机生成导致库内凭据不可解密。"""
+    try:
+        if _DEV_KEY_PATH.exists():
+            existing = _DEV_KEY_PATH.read_text(encoding="utf-8").strip()
+            if existing:
+                Fernet(existing.encode())
+                return existing
+        generated = Fernet.generate_key().decode()
+        _DEV_KEY_PATH.parent.mkdir(parents=True, exist_ok=True)
+        _DEV_KEY_PATH.write_text(generated, encoding="utf-8")
+        _DEV_KEY_PATH.chmod(0o600)
+        logger.warning("SECRET_KEY 未配置：已在 %s 生成 dev 本地密钥（该文件不入库）", _DEV_KEY_PATH)
+        return generated
+    except (OSError, ValueError, TypeError):
+        return Fernet.generate_key().decode()
 
 
 class Settings(BaseSettings):
@@ -32,6 +63,8 @@ class Settings(BaseSettings):
     database_url: str = PLACEHOLDER_DSN
     redis_url: str = "redis://127.0.0.1:6379/0"
     secret_key: str = ""
+    # 轮换时填写旧值，MultiFernet 会在解密时依次尝试，加密始终使用最新的派生密钥。
+    secret_key_previous: str = ""
     llm_base_url: str = ""
     llm_api_key: str = ""
     llm_model: str = ""
@@ -40,7 +73,10 @@ class Settings(BaseSettings):
     checkpoint_backend: str = "redis"
     cookie_secure: bool = False
     csrf_enabled: bool = False
-    environment: str = "dev"
+    # 仅在部署于受信任反向代理之后才开启，用于按真实来源 IP 做登录限流。
+    trust_proxy_headers: bool = False
+    # 默认按生产环境启动；只有显式设置 ENVIRONMENT=dev 才降级本地开发校验。
+    environment: str = "prod"
     demo_access_key: str = ""
     platform_domain: str = "http://localhost:8000"
     cors_origins: str = LOCAL_CORS_ORIGINS
@@ -78,8 +114,18 @@ class Settings(BaseSettings):
     http_allow_hosts: str = ""  # 逗号分隔域名白名单，留空表示允许任意公网域名
     http_timeout_seconds: int = 15
     http_max_response_bytes: int = 512 * 1024
-    # 内置工具：代码执行沙箱
-    sandbox_enabled: bool = True
+    # 对外网关与管理面请求体上限，防止超大 body 造成内存与上游费用放大。
+    max_request_body_bytes: int = 2 * 1024 * 1024
+    # 自然日统计、日志时间筛选与内置时间工具共用的平台时区（IANA 名称）。
+    platform_timezone: str = "Asia/Shanghai"
+    # MCP stdio：默认关闭。开启后仅允许白名单里的可执行文件名，命令按固定系统路径
+    # 解析，且用户 env 不得覆盖 PATH / LD_* 等可劫持执行的环境变量。
+    mcp_stdio_enabled: bool = False
+    mcp_stdio_allowed_commands: str = ""
+
+    # 内置工具：代码执行沙箱。应用层白名单只是纵深防御，不是 OS 级隔离，
+    # 生产启用前必须配合容器 / seccomp / 只读文件系统；默认保持关闭。
+    sandbox_enabled: bool = False
     sandbox_timeout_seconds: int = 8
     sandbox_memory_mb: int = 256
     sandbox_max_output_chars: int = 8000
@@ -89,11 +135,36 @@ class Settings(BaseSettings):
 
     @property
     def session_cookie_name(self) -> str:
-        return "albedo_session"
+        # __Host- 前缀要求 Secure + Path=/ + 无 Domain，只在启用 Secure Cookie 时使用。
+        return "__Host-albedo_session" if self.cookie_secure else "albedo_session"
+
+    @property
+    def csrf_cookie_name(self) -> str:
+        return "__Host-albedo_csrf" if self.cookie_secure else "albedo_csrf"
+
+    @property
+    def session_samesite(self) -> str:
+        return "strict" if self.cookie_secure else "lax"
 
     @property
     def fernet_key(self) -> bytes:
         return self.secret_key.encode()
+
+    @property
+    def fernet_keys(self) -> list[bytes]:
+        """MultiFernet 密钥环：首个用于加密，其余仅用于解密历史数据。"""
+        keys: list[bytes] = []
+        for raw in (self.secret_key, self.secret_key_previous):
+            if not raw:
+                continue
+            try:
+                Fernet(raw.encode())
+            except (ValueError, TypeError):
+                logger.warning("SECRET_KEY_PREVIOUS 不是合法的 Fernet 密钥，已忽略")
+                continue
+            keys.append(_derive_data_key(raw.encode()))
+            keys.append(raw.encode())
+        return keys
 
     @property
     def cors_origin_list(self) -> list[str]:
@@ -110,8 +181,7 @@ class Settings(BaseSettings):
 
         if self.environment == "dev":
             if not self.secret_key:
-                self.secret_key = Fernet.generate_key().decode()
-                logger.warning("SECRET_KEY 未配置：已生成本进程临时密钥，重启后已加密凭据不可解密")
+                self.secret_key = _persistent_dev_key()
             return self
 
         problems: list[str] = []
@@ -122,7 +192,7 @@ class Settings(BaseSettings):
                 Fernet(self.secret_key.encode())
             except (ValueError, TypeError):
                 problems.append("SECRET_KEY 不是合法的 Fernet 密钥")
-        if self.demo_access_key in PUBLIC_DEMO_KEYS:
+        if is_public_demo_key(self.demo_access_key):
             problems.append("DEMO_ACCESS_KEY 不得使用公开文档中的演示 Key")
         if PLACEHOLDER_DSN in self.database_url:
             problems.append("DATABASE_URL 必须指向真实实例")
@@ -151,7 +221,7 @@ RUNTIME_CONFIG_FIELDS = frozenset({
     "llm_model", "llm_timeout_seconds", "llm_temperature",
     "search_provider", "search_max_results",
     "http_allow_hosts", "http_timeout_seconds", "http_max_response_bytes",
-    "sandbox_enabled", "sandbox_timeout_seconds", "sandbox_memory_mb", "sandbox_max_output_chars",
+    "sandbox_timeout_seconds", "sandbox_memory_mb", "sandbox_max_output_chars",
     "tool_upload_max_bytes", "vision_model",
     "session_idle_hours", "session_absolute_hours", "login_max_failures", "login_lock_seconds",
 })

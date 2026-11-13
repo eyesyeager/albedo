@@ -76,13 +76,29 @@ def test_secret_masking_and_export_redaction() -> None:
     assert "sk-live-abcdef" not in csv_text
 
 
-def test_signed_download_url() -> None:
-    url = sign_download_url("exp-test", 300)
+async def test_signed_download_url(monkeypatch) -> None:
+    import app.api.v1.logs as logs_module
+
+    store: dict[str, str] = {}
+
+    async def fake_set(key: str, value: str, _ttl: int) -> None:
+        store[key] = value
+
+    async def fake_get(key: str) -> str | None:
+        return store.get(key)
+
+    monkeypatch.setattr(logs_module, "try_set", fake_set)
+    monkeypatch.setattr(logs_module, "try_get", fake_get)
+
+    url = await sign_download_url("exp-test", 300)
     query = dict(part.split("=", 1) for part in url.split("?", 1)[1].split("&"))
-    assert verify_download_signature("exp-test", query["expires"], query["signature"])
-    assert not verify_download_signature("exp-other", query["expires"], query["signature"])
-    assert not verify_download_signature("exp-test", str(int(time.time()) - 10), query["signature"])
-    assert not verify_download_signature("exp-test", None, None)
+    args = ("exp-test", query["expires"], query["nonce"], query["signature"])
+    assert await verify_download_signature(*args)
+    # 一次性：同一链接再次使用必须被拒绝
+    assert not await verify_download_signature(*args)
+    assert not await verify_download_signature("exp-other", query["expires"], query["nonce"], query["signature"])
+    assert not await verify_download_signature("exp-test", str(int(time.time()) - 10), query["nonce"], query["signature"])
+    assert not await verify_download_signature("exp-test", None, None, None)
 
 
 @pytest.mark.asyncio

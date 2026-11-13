@@ -5,6 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.adapters.gateway import ModelGateway
 from app.api.deps import current_session
 from app.core.errors import ApiException
+from app.core.network import assert_public_url
 from app.core.security import decrypt_secret, new_id, now_iso, suffix_of
 from app.db import models as m
 from app.db.seed import to_row
@@ -102,6 +103,7 @@ async def create_model(
     base_url = validate_blank(payload.baseUrl, "Base URL 不能为空")
     api_key = validate_blank(payload.apiKey, "上游 API Key 不能为空")
     validate_json_object(payload.headers)
+    await assert_public_url(base_url)
     config = await get_configs(db)
     probe = await ModelGateway().test_connection({
         "upstreamModelId": upstream,
@@ -168,11 +170,16 @@ async def update_model(
     patch = payload.model_dump(exclude_unset=True)
     if patch.get("baseUrl") is not None:
         validate_blank(patch["baseUrl"], "Base URL 不能为空")
+        await assert_public_url(str(patch["baseUrl"]))
     if "headers" in patch:
         validate_json_object(patch["headers"])
     updates = to_row(patch, m.ModelResource, aliases={"headers": "headers_enc"})
     if "headers" in patch:
-        updates["headers_enc"] = write_headers(patch["headers"])
+        # 常规接口只下发空串；留空表示「不修改」，避免用户未编辑时清空已配置头。
+        if str(patch["headers"]).strip():
+            updates["headers_enc"] = write_headers(patch["headers"])
+        else:
+            updates.pop("headers_enc", None)
     for column, value in updates.items():
         setattr(row, column, value)
     if any(key in patch for key in ("baseUrl", "headers", "credentialSuffix")):

@@ -338,3 +338,19 @@ class TrendDaily(Base):
     call_count: Mapped[int] = mapped_column(Integer, default=0)
     success_count: Mapped[int] = mapped_column(Integer, default=0)
     total_duration_ms: Mapped[int] = mapped_column(Integer, default=0)
+
+
+# 高频筛选/清理字段的复合索引。放在类定义之后注册，create_all 与迁移保持同一份真相。
+# 时间列仍是 ISO 字符串，范围条件依赖字典序，因此复合索引必须以 timestamp 结尾。
+PERFORMANCE_INDEXES = (
+    ("log_entries", "ix_log_agent_time", ("agent_id", "timestamp")),
+    ("log_entries", "ix_log_resource_time", ("resource_id", "timestamp")),
+    ("chat_messages", "ix_chat_thread_time", ("thread_id", "timestamp")),
+    ("export_tasks", "ix_export_expires_status", ("expires_at", "status")),
+    ("credentials", "ix_cred_type_suffix", ("type", "suffix")),
+    ("notifications", "ix_notification_time", ("timestamp",)),
+    ("runs", "ix_run_created", ("created_at",)),
+)
+for _table_name, _index_name, _columns in PERFORMANCE_INDEXES:
+    _table = Base.metadata.tables[_table_name]
+    Index(_index_name, *(_table.c[column] for column in _columns))

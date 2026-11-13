@@ -1,5 +1,6 @@
 import importlib
 import json
+import os
 
 import pytest
 from httpx import ASGITransport, AsyncClient
@@ -109,7 +110,15 @@ def upstream_probes(monkeypatch):
 
 @pytest.fixture
 async def client() -> AsyncClient:
-    db_engine = create_async_engine(get_settings().database_url, poolclass=NullPool)
+    # baseline.py 会按固定 ID 删除并写入演示基线数据，连接业务库会直接污染生产数据。
+    # 因此集成测试强制使用独立数据库，未配置时直接终止而不是偷偷回退到 .env 的 DSN。
+    test_url = os.environ.get("ALBEDO_TEST_DATABASE_URL", "").strip()
+    if not test_url or test_url == get_settings().database_url:
+        pytest.exit(
+            "必须设置 ALBEDO_TEST_DATABASE_URL 指向独立测试库，且不得与 DATABASE_URL 相同",
+            returncode=2,
+        )
+    db_engine = create_async_engine(test_url, poolclass=NullPool)
     maker = async_sessionmaker(db_engine, expire_on_commit=False, autoflush=False)
 
     async with maker() as session:

@@ -6,7 +6,7 @@ import { formatTime } from '../../lib/format'
 import { api } from '../../lib/api'
 import { asError } from '../../lib/errors'
 import { useWorkspace } from '../../store/workspace'
-import { EmptyState, IconButton, Select, toast } from '../../components/ui'
+import { ConfirmDialog, EmptyState, IconButton, Select, toast } from '../../components/ui'
 
 const EMPTY_MESSAGES: ChatMessage[] = []
 
@@ -66,6 +66,13 @@ export function TestChatPanel({ agentId, draft, focusSignal, testModelId, onTest
   const [sending, setSending] = useState(false)
   const inputRef = useRef<HTMLTextAreaElement>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
+  const streamController = useRef<AbortController | null>(null)
+  const [confirmClear, setConfirmClear] = useState(false)
+
+  useEffect(() => () => {
+    // 切换 Tab / 离开详情页时取消在途流，避免上游继续运行与占位消息残留。
+    streamController.current?.abort()
+  }, [])
 
   const testOptions = models.filter((model) => model.enabled && model.type === 'chat' && model.connection === 'normal')
     .map((model) => ({ value: model.id, label: model.name }))
@@ -88,8 +95,10 @@ export function TestChatPanel({ agentId, draft, focusSignal, testModelId, onTest
     if (!content || sending) return
     setInput('')
     setSending(true)
+    const controller = new AbortController()
+    streamController.current = controller
     api.chat
-      .stream(agentId, content, testModelId)
+      .stream(agentId, content, testModelId, controller.signal)
       .then((result) => toast.info(`测试运行完成 · ${result.runId}`))
       .catch((reason: unknown) => {
         const message = asError(reason).message
@@ -106,13 +115,27 @@ export function TestChatPanel({ agentId, draft, focusSignal, testModelId, onTest
     }
   }
 
-  const clear = () => {
-    void api.chat.clear(agentId)
-    toast.success('测试对话已清空，历史日志仍保留')
+  const clear = async () => {
+    try {
+      await api.chat.clear(agentId)
+      toast.success('测试对话已清空，历史日志仍保留')
+    } catch (reason) {
+      toast.error(asError(reason).message)
+    }
   }
 
   return (
     <div className="card flex h-[620px] flex-col xl:h-[calc(100vh-220px)] xl:min-h-[520px]">
+      <ConfirmDialog
+        open={confirmClear}
+        onClose={() => setConfirmClear(false)}
+        onConfirm={() => { setConfirmClear(false); void clear() }}
+        title="清空测试对话"
+        description="将删除当前智能体的全部测试会话消息，历史调用日志仍会保留。"
+        confirmText="确认清空"
+        danger
+        impacts={['当前测试会话中的所有消息与思考记录会被移除', '历史调用日志与 Run 记录不受影响', '操作不可撤销']}
+      />
       <div className="flex items-center justify-between gap-2 border-b border-line px-3 py-3">
         <div className="min-w-0">
           <p className="truncate text-xs font-semibold text-ink">测试会话 · 配置实时生效</p>
@@ -126,7 +149,7 @@ export function TestChatPanel({ agentId, draft, focusSignal, testModelId, onTest
             options={testOptions.length ? testOptions : [{ value: '', label: '暂无模型' }]}
             className="h-7 w-[110px] py-1 text-2xs"
           />
-          <IconButton label="清空对话" onClick={clear}><Trash2 className="h-3.5 w-3.5" /></IconButton>
+          <IconButton label="清空对话" onClick={() => setConfirmClear(true)}><Trash2 className="h-3.5 w-3.5" /></IconButton>
         </div>
       </div>
 

@@ -194,8 +194,6 @@ class McpGateway:
             )
         tool = next((item for item in tools if str(item.name) == tool_key), None)
         if tool is None:
-            tool = next((item for item in tools if str(item.name).endswith(tool_key)), None)
-        if tool is None:
             raise ApiException(
                 "resource_not_found",
                 f"MCP 服务未提供工具「{tool_key}」，请重新测试连接刷新工具清单",

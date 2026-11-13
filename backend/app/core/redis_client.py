@@ -22,13 +22,21 @@ def get_redis() -> redis.Redis:
     return _client
 
 
+# 只在计数器创建时设置过期时间。若每次 INCR 都 EXPIRE，持续流量会把固定窗口
+# 无限续期、计数单调增长，最终让限流键永久处于超限状态。
+_INCREMENT_SCRIPT = """
+local current = redis.call('INCR', KEYS[1])
+if current == 1 then
+  redis.call('EXPIRE', KEYS[1], ARGV[1])
+end
+return current
+"""
+
+
 async def try_increment(key: str, ttl_seconds: int) -> int:
     try:
         client = get_redis()
-        async with client.pipeline(transaction=True) as pipe:
-            pipe.incr(key)
-            pipe.expire(key, ttl_seconds)
-            count, _ = await pipe.execute()
+        count = await client.eval(_INCREMENT_SCRIPT, 1, key, max(1, int(ttl_seconds)))
         return int(count)
     except Exception:
         async with _local_lock:
@@ -40,6 +48,26 @@ async def try_increment(key: str, ttl_seconds: int) -> int:
             current += 1
             _local_counters[key] = (current, expires_at)
             return current
+
+
+_local_locks: dict[str, float] = {}
+
+
+async def try_setnx(key: str, value: str, ttl_seconds: int) -> bool:
+    """分布式幂等锁：仅首次设置成功，Redis 不可用时降级到进程内短 TTL 锁。"""
+    ttl = max(1, int(ttl_seconds))
+    try:
+        return bool(await get_redis().set(key, value, ex=ttl, nx=True))
+    except Exception:  # noqa: BLE001
+        async with _local_lock:
+            loop = asyncio.get_running_loop()
+            now = loop.time()
+            for stale in [name for name, expires_at in _local_locks.items() if expires_at < now]:
+                _local_locks.pop(stale, None)
+            if key in _local_locks:
+                return False
+            _local_locks[key] = now + ttl
+            return True
 
 
 async def try_get_count(key: str) -> int:

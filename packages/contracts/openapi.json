@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Albedo Management API",
-    "description": "albedo 智能体开发平台管理面与对外 API（M0–M5b）",
+    "description": "albedo 智能体开发平台管理面与对外 API",
     "version": "1.0.0"
   },
   "paths": {
@@ -3061,6 +3061,7 @@
               "$ref": "#/components/schemas/ChatMessageInput"
             },
             "type": "array",
+            "maxItems": 100,
             "title": "Messages"
           },
           "tools": {
@@ -3671,6 +3672,7 @@
           },
           "content": {
             "type": "string",
+            "maxLength": 100000,
             "title": "Content",
             "default": ""
           }
@@ -4585,10 +4587,20 @@
             "type": "string",
             "title": "Headers"
           },
+          "headersConfigured": {
+            "type": "boolean",
+            "title": "Headersconfigured",
+            "default": false
+          },
           "env": {
             "type": "string",
             "title": "Env",
             "default": ""
+          },
+          "envConfigured": {
+            "type": "boolean",
+            "title": "Envconfigured",
+            "default": false
           },
           "timeoutSeconds": {
             "type": "integer",
@@ -5196,6 +5208,11 @@
             "type": "string",
             "title": "Headers"
           },
+          "headersConfigured": {
+            "type": "boolean",
+            "title": "Headersconfigured",
+            "default": false
+          },
           "timeoutSeconds": {
             "type": "integer",
             "title": "Timeoutseconds"
@@ -5505,6 +5522,7 @@
               "$ref": "#/components/schemas/ChatMessageInput"
             },
             "type": "array",
+            "maxItems": 100,
             "title": "Messages"
           },
           "threadId": {
@@ -5834,7 +5852,9 @@
           "retentionDays": {
             "anyOf": [
               {
-                "type": "integer"
+                "type": "integer",
+                "maximum": 365.0,
+                "minimum": 1.0
               },
               {
                 "type": "null"

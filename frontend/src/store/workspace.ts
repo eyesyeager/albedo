@@ -47,6 +47,7 @@ interface WorkspaceStore extends WorkspaceData {
   appendChatDelta: (agentId: string, id: string, delta: string) => void
   appendChatThinking: (agentId: string, id: string, delta: string) => void
   commitChatRun: (agentId: string, dropIds: string[], messages: ChatMessage[]) => void
+  dropChatMessages: (agentId: string, ids: string[]) => void
   clearChat: (agentId: string) => void
 }
 
@@ -188,6 +189,16 @@ export const useWorkspace = create<WorkspaceStore>()((set) => ({
       const dropped = new Set(dropIds)
       const kept = (state.chatSessions[agentId] ?? []).filter((message) => !dropped.has(message.id))
       return { chatSessions: { ...state.chatSessions, [agentId]: [...kept, ...messages] } }
+    }),
+  dropChatMessages: (agentId, ids) =>
+    set((state) => {
+      const dropped = new Set(ids)
+      return {
+        chatSessions: {
+          ...state.chatSessions,
+          [agentId]: (state.chatSessions[agentId] ?? []).filter((message) => !dropped.has(message.id)),
+        },
+      }
     }),
   clearChat: (agentId) => set((state) => ({ chatSessions: { ...state.chatSessions, [agentId]: [] } })),
 }))

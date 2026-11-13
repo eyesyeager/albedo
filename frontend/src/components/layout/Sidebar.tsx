@@ -1,11 +1,13 @@
+import { useState } from 'react'
 import { NavLink, useNavigate } from 'react-router-dom'
 import {
   Blocks, Bot, ChevronRight, Cpu, LayoutDashboard, LogOut, Plug, ScrollText, Settings2, Sparkles, Wrench, X,
 } from 'lucide-react'
 import { cn } from '../../lib/cn'
 import { api } from '../../lib/api'
+import { asError } from '../../lib/errors'
 import { useWorkspace } from '../../store/workspace'
-import { toast } from '../ui'
+import { ConfirmDialog, toast } from '../ui'
 import { AGENT_THEMES } from '../common/GradientAvatar'
 
 interface NavItem {
@@ -44,15 +46,30 @@ export function Sidebar({ mobileOpen, onClose }: { mobileOpen: boolean; onClose:
   const workspaceName = useWorkspace((state) => state.settings.workspaceName)
   const version = useWorkspace((state) => state.systemConfig.platform.version)
   const hasAbnormalLogs = useWorkspace((state) => state.logs.some((log) => log.status === 'failed' || log.status === 'timeout'))
+  const [confirmLogout, setConfirmLogout] = useState(false)
 
   const handleLogout = async () => {
-    await api.auth.logout()
-    toast.success('已退出登录')
-    navigate('/login')
+    try {
+      await api.auth.logout()
+      toast.success('已退出登录')
+      navigate('/login')
+    } catch (reason) {
+      toast.error(asError(reason).message)
+    }
   }
 
   return (
     <>
+      <ConfirmDialog
+        open={confirmLogout}
+        onClose={() => setConfirmLogout(false)}
+        onConfirm={() => { setConfirmLogout(false); void handleLogout() }}
+        title="退出登录"
+        description="退出后当前会话会被服务端撤销，需要重新输入访问 Key 登录。"
+        confirmText="确认退出"
+        danger
+        impacts={['当前会话立即失效', '已保存的业务数据不受影响', '需重新输入访问 Key 才能进入工作台']}
+      />
       {mobileOpen && <div className="fixed inset-0 z-40 bg-ink/50 lg:hidden" onClick={onClose} aria-hidden />}
       <aside
         className={cn(
@@ -122,7 +139,7 @@ export function Sidebar({ mobileOpen, onClose }: { mobileOpen: boolean; onClose:
               <p className="truncate text-2xs text-white/90">{workspaceName}</p>
               <p className="text-[10px] text-white/40">本机工作区</p>
             </div>
-            <button type="button" aria-label="退出登录" title="退出登录" onClick={handleLogout} className="text-white/45 transition-colors hover:text-white">
+            <button type="button" aria-label="退出登录" title="退出登录" onClick={() => setConfirmLogout(true)} className="text-white/45 transition-colors hover:text-white">
               <LogOut className="h-3.5 w-3.5" />
             </button>
           </div>

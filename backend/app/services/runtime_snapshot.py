@@ -3,12 +3,15 @@ import zipfile
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.security import decrypt_secret
 from app.db import models as m
 from app.services.agent_rules import load_mounts, load_skill_mount_versions
 from app.services.common import agent_to_dict, model_to_dict, read_headers
 from app.services.skill_package import resource_members, script_members
 from app.services.skill_storage import materialize_async
 from app.services.system_config import limit as config_limit
+
+_SENSITIVE_KEYS = {"upstream", "headers", "env", "apiKey", "cipher", "hash"}
 
 
 async def build_runtime_snapshot(session: AsyncSession, agent: m.Agent, model: m.ModelResource) -> dict:
@@ -18,6 +21,23 @@ async def build_runtime_snapshot(session: AsyncSession, agent: m.Agent, model: m
     """
     snapshot = await agent_to_dict(session, agent)
     snapshot["model"] = model_to_dict(model)
+    # 推理必须使用智能体实际配置的模型资源，而不是全局 LLM_* 兜底：
+    # 否则停用/更换默认模型、配置上游地址与自定义头都不会生效，日志也与实际调用不符。
+    upstream_credential = await session.scalar(
+        select(m.Credential).where(
+            m.Credential.type == "upstream_model_key",
+            m.Credential.resource_id == model.id,
+        )
+    )
+    snapshot["upstream"] = {
+        "apiKey": (
+            decrypt_secret(upstream_credential.cipher)
+            if upstream_credential and upstream_credential.cipher else ""
+        ) or "",
+        "baseUrl": model.base_url,
+        "model": model.upstream_model_id,
+        "headers": read_headers(model.headers_enc),
+    }
     mounts = await load_mounts(session, agent.id)
     mount_versions = await load_skill_mount_versions(session, agent.id)
     resolved: dict[str, list[dict]] = {"mcp": [], "skill": [], "tool": [], "model": []}
@@ -124,3 +144,22 @@ async def build_runtime_snapshot(session: AsyncSession, agent: m.Agent, model: m
         for item in resolved["skill"]
     ]
     return snapshot
+
+
+def safe_snapshot(snapshot: dict) -> dict:
+    """落库前剔除解密后的凭据与请求头，避免明文进入 runs.config_snapshot。"""
+    cleaned = {key: value for key, value in snapshot.items() if key not in _SENSITIVE_KEYS}
+    model = cleaned.get("model")
+    if isinstance(model, dict):
+        cleaned["model"] = {k: v for k, v in model.items() if k not in _SENSITIVE_KEYS}
+    resolved = cleaned.get("resolvedMounts")
+    if isinstance(resolved, dict):
+        cleaned["resolvedMounts"] = {
+            group: [
+                {k: v for k, v in item.items() if k not in _SENSITIVE_KEYS}
+                if isinstance(item, dict) else item
+                for item in (items if isinstance(items, list) else [])
+            ]
+            for group, items in resolved.items()
+        }
+    return cleaned

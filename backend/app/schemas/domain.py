@@ -54,7 +54,9 @@ class McpServer(DomainModel):
     transport: McpTransport
     endpoint: str
     headers: str
+    headersConfigured: bool = False
     env: str = ""
+    envConfigured: bool = False
     timeoutSeconds: int
     qpm: int
     maxConcurrency: int
@@ -125,6 +127,7 @@ class ModelResource(DomainModel):
     baseUrl: str
     credentialSuffix: str
     headers: str
+    headersConfigured: bool = False
     timeoutSeconds: int
     note: str
     enabled: bool

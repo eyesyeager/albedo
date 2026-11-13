@@ -1,6 +1,8 @@
 import hashlib
 import hmac
 import json
+import logging
+import secrets
 import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -15,6 +17,8 @@ from app.api.deps import current_session
 from app.core.config import get_settings
 from app.core.errors import ApiException
 from app.core.logging import mask_text, sanitize
+from app.core.redis_client import try_get, try_set
+from app.services.trends import platform_tz
 from app.core.security import iso_after, new_id, now_iso
 from app.db import models as m
 from app.db.session import get_db
@@ -45,7 +49,11 @@ def task_to_dict(row: m.ExportTask) -> dict[str, Any]:
 
 
 def csv_cell(value: Any) -> str:
-    return '"' + str(value if value is not None else "").replace('"', '""') + '"'
+    text = str(value if value is not None else "")
+    # 公式注入：Excel / Sheets 会把以这些字符开头的单元格当作公式执行。
+    if text.lstrip().startswith(("=", "+", "-", "@", "\t", "\r")):
+        text = "'" + text
+    return '"' + text.replace('"', '""') + '"'
 
 
 def build_csv(logs: list[dict[str, Any]]) -> str:
@@ -63,15 +71,30 @@ def build_json(logs: list[dict[str, Any]]) -> str:
     return json.dumps([sanitize(log) for log in logs], ensure_ascii=False, indent=2)
 
 
-def sign_download_url(task_id: str, ttl_seconds: int) -> str:
+logger = logging.getLogger("albedo.logs.exports")
+
+
+def _nonce_key(task_id: str) -> str:
+    return f"albedo:export:nonce:{task_id}"
+
+
+async def sign_download_url(task_id: str, ttl_seconds: int) -> str:
+    """签发带一次性 nonce 的下载链接；nonce 同时进入签名与 Redis。"""
     expires = int(time.time()) + ttl_seconds
+    nonce = secrets.token_urlsafe(16)
+    await try_set(_nonce_key(task_id), nonce, ttl_seconds)
     secret = get_settings().secret_key.encode()
-    signature = hmac.new(secret, f"{task_id}:{expires}".encode(), hashlib.sha256).hexdigest()
-    return f"/api/v1/logs/exports/{task_id}/download?expires={expires}&signature={signature}"
+    signature = hmac.new(secret, f"{task_id}:{expires}:{nonce}".encode(), hashlib.sha256).hexdigest()
+    return (
+        f"/api/v1/logs/exports/{task_id}/download"
+        f"?expires={expires}&nonce={nonce}&signature={signature}"
+    )
 
 
-def verify_download_signature(task_id: str, expires: str | None, signature: str | None) -> bool:
-    if not expires or not signature:
+async def verify_download_signature(
+    task_id: str, expires: str | None, nonce: str | None, signature: str | None
+) -> bool:
+    if not expires or not nonce or not signature:
         return False
     try:
         deadline = int(expires)
@@ -79,9 +102,20 @@ def verify_download_signature(task_id: str, expires: str | None, signature: str 
         return False
     if deadline < int(time.time()):
         return False
+    stored = await try_get(_nonce_key(task_id))
+    if stored is None:
+        # Redis 不可用 / 未写入 nonce 时降级为仅 HMAC 校验，保证导出仍可用。
+        logger.warning("导出签名 nonce 缓存不可用，降级为仅签名校验：%s", task_id)
+    elif str(stored) == "used" or not hmac.compare_digest(str(stored), nonce):
+        return False
     secret = get_settings().secret_key.encode()
-    expected = hmac.new(secret, f"{task_id}:{deadline}".encode(), hashlib.sha256).hexdigest()
-    return hmac.compare_digest(expected, signature)
+    expected = hmac.new(secret, f"{task_id}:{deadline}:{nonce}".encode(), hashlib.sha256).hexdigest()
+    if not hmac.compare_digest(expected, signature):
+        return False
+    if stored is not None:
+        # 标记为已消费而不是删除：删除后无法区分「已用」与「缓存不可用」，会放行重放。
+        await try_set(_nonce_key(task_id), "used", max(1, deadline - int(time.time())))
+    return True
 
 
 async def log_conditions(
@@ -120,7 +154,7 @@ async def log_conditions(
 def range_cutoff(value: str) -> str:
     now = datetime.now(timezone.utc)
     if value == "today":
-        local_start = datetime.now(timezone(timedelta(hours=8))).replace(hour=0, minute=0, second=0, microsecond=0)
+        local_start = datetime.now(platform_tz()).replace(hour=0, minute=0, second=0, microsecond=0)
         start = local_start.astimezone(timezone.utc)
     elif value == "30d":
         start = now - timedelta(days=30)
@@ -251,7 +285,7 @@ async def get_export_task(
         await db.commit()
     config = await get_configs(db)
     ttl = int(config["limits"]["downloadSignTtlSeconds"])
-    download_url = sign_download_url(task_id, ttl) if row.status == "completed" else None
+    download_url = await sign_download_url(task_id, ttl) if row.status == "completed" else None
     return {"task": task_to_dict(row), "log": log, "downloadUrl": download_url}
 
 
@@ -263,13 +297,19 @@ async def download_export(
     _: m.Session = Depends(current_session),
 ) -> FileResponse:
     expires = request.query_params.get("expires")
+    nonce = request.query_params.get("nonce")
     signature = request.query_params.get("signature")
     # 下载链接必须携带由轮询接口签发的一次性签名，未签名请求一律拒绝。
-    if not verify_download_signature(task_id, expires, signature):
+    if not await verify_download_signature(task_id, expires, nonce, signature):
         raise ApiException("invalid_api_key", "下载链接已过期或签名无效，请重新导出", 403)
     row = await get_or_404(db, m.ExportTask, task_id)
     if row.status != "completed" or not row.file_path or not Path(row.file_path).exists():
         raise ApiException("resource_not_found", "导出文件尚未生成或已过期", 404)
+    # 签名 TTL 与业务过期时间必须同时生效，避免过期数据仍可凭旧签名下载。
+    if row.expires_at and row.expires_at < now_iso():
+        raise ApiException("resource_not_found", "导出文件已过期，请重新导出", 404)
+    await audit(db, "下载日志导出", f"下载导出任务 {task_id}（{row.record_count} 条记录）", resource_id=task_id)
+    await db.commit()
     media_type = "text/csv; charset=utf-8" if row.format == "csv" else "application/json; charset=utf-8"
     return FileResponse(row.file_path, filename=f"albedo-logs-{task_id}.{row.format}", media_type=media_type)
 
@@ -292,12 +332,11 @@ async def log_detail(
     return detail
 
 
-async def prune_logs(db: AsyncSession, retention_days: int) -> int:
-    cutoff = (datetime.now(timezone.utc) - timedelta(days=retention_days)).isoformat(timespec="milliseconds").replace("+00:00", "Z")
-    from sqlalchemy import delete
+async def prune_logs(db: AsyncSession, retention_days: int):
+    """兼容入口：实际实现已下沉到 service 层，供设置页与 arq 任务共用。"""
+    from app.services.log_retention import prune_logs as _prune
 
-    result = await db.execute(delete(m.LogEntry).where(m.LogEntry.timestamp < cutoff))
-    return int(result.rowcount or 0)
+    return await _prune(db, retention_days)
 
 
 async def mark_expired_exports(db: AsyncSession) -> None:

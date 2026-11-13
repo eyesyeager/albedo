@@ -40,7 +40,9 @@ export interface McpServer {
   transport: McpTransport
   endpoint: string
   headers: string
+  headersConfigured?: boolean
   env: string
+  envConfigured?: boolean
   timeoutSeconds: number
   qpm: number
   maxConcurrency: number
@@ -117,6 +119,7 @@ export interface ModelResource {
   baseUrl: string
   credentialSuffix: string
   headers: string
+  headersConfigured?: boolean
   timeoutSeconds: number
   note: string
   enabled: boolean

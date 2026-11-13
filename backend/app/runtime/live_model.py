@@ -1,10 +1,14 @@
 import asyncio
+import json
 from typing import Any
 
 from langchain_openai import ChatOpenAI
 
 from app.core.config import get_settings
 from app.core.errors import ApiException
+from app.core.network import assert_public_literal
+
+FORBIDDEN_UPSTREAM_HEADERS = {"host", "content-length", "connection", "transfer-encoding"}
 
 RETRYABLE_STATUS = {408, 409, 425, 429, 500, 502, 503, 504}
 
@@ -24,7 +28,9 @@ def is_retryable(exc: Exception) -> bool:
     status = upstream_status(exc)
     if status in RETRYABLE_STATUS:
         return True
-    return is_timeout_error(exc) or isinstance(exc, (ConnectionError, OSError))
+    # 客户端侧超时 / 断连时上游可能已经生成并计费，自动重发同一 messages 会重复扣费，
+    # 且日志里只记录最终一次调用，无法对账。只对「明确未发出请求」的连接错误重试。
+    return isinstance(exc, (ConnectionError, OSError)) and not is_timeout_error(exc)
 
 
 def map_upstream_error(exc: Exception) -> ApiException | None:
@@ -71,17 +77,37 @@ class ReasoningChatOpenAI(ChatOpenAI):
 
 def build_live_model(snapshot: dict, tool_names: list[str], rendered: str) -> ChatOpenAI:
     settings = get_settings()
-    if not settings.llm_api_key or not settings.llm_model:
+    # 以运行快照中的模型资源为准；仅当资源未配置完整时才回退到全局 LLM_* 环境变量。
+    upstream = snapshot.get("upstream") or {}
+    api_key = str(upstream.get("apiKey") or "") or settings.llm_api_key
+    base_url = str(upstream.get("baseUrl") or "") or settings.llm_base_url
+    model_name = str(upstream.get("model") or "") or settings.llm_model
+    if not api_key or not model_name:
         raise ApiException(
             "upstream_auth_failed",
-            "未配置真实模型凭据，请在 backend/.env 中设置 LLM_BASE_URL / LLM_API_KEY / LLM_MODEL",
+            "模型资源未配置完整的上游凭据或 Model ID，请在「资源 → 模型」中补齐",
             401,
         )
+    if base_url:
+        assert_public_literal(base_url)
+
+    custom_headers: dict[str, str] = {}
+    raw_headers = str(upstream.get("headers") or "")
+    if raw_headers.strip():
+        try:
+            parsed = json.loads(raw_headers)
+            if isinstance(parsed, dict):
+                custom_headers = {
+                    str(key): str(value)
+                    for key, value in parsed.items()
+                    if str(key).lower() not in FORBIDDEN_UPSTREAM_HEADERS
+                }
+        except json.JSONDecodeError:
+            custom_headers = {}
+
     params: dict[str, Any] = snapshot.get("modelParams") or {}
     temperature = float(params.get("temperature", settings.llm_temperature))
     # 推理模型在正式回答前可能数分钟只输出 reasoning_content，甚至长时间没有首个 chunk。
-    # 若沿用全局 LLM_TIMEOUT_SECONDS（默认 120s），上游读超时会中断本轮流式请求，
-    # _stream_model 再从头重试，两三次重试就吃光 maxRunSeconds，客户端最终颗粒无收。
     # 单次上游请求至少覆盖整轮运行时长，整体仍由 RuntimeEngine 的 maxRunSeconds 兜底。
     advanced = snapshot.get("advanced") or {}
     try:
@@ -90,9 +116,10 @@ def build_live_model(snapshot: dict, tool_names: list[str], rendered: str) -> Ch
         run_seconds = 0.0
     timeout_seconds = max(float(settings.llm_timeout_seconds or 60), run_seconds, 1.0)
     return ReasoningChatOpenAI(
-        model=settings.llm_model,
-        api_key=settings.llm_api_key,
-        base_url=settings.llm_base_url or None,
+        model=model_name,
+        api_key=api_key,
+        base_url=base_url or None,
+        default_headers=custom_headers or None,
         temperature=min(2.0, max(0.0, temperature)),
         timeout=timeout_seconds,
         max_retries=0,

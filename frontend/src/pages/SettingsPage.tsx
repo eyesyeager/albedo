@@ -1,11 +1,11 @@
 import { useEffect, useState } from 'react'
 import { Database, Globe2, KeyRound, ShieldCheck, SlidersHorizontal } from 'lucide-react'
-import type { SystemConfig, WorkspaceSettings } from '../types/domain'
+import type { WorkspaceSettings } from '../types/domain'
 import { maskedAccessKey } from '../lib/mask'
 import { api } from '../lib/api'
 import { asError } from '../lib/errors'
 import { useWorkspace } from '../store/workspace'
-import { Badge, Button, CopyButton, Field, Input, Select, Switch, toast } from '../components/ui'
+import { Badge, Button, ConfirmDialog, CopyButton, Field, Input, Select, Switch, toast } from '../components/ui'
 import { PageHeader, SectionCard } from '../components/common/PageHeader'
 import { ChangeKeyDialog } from './settings/ChangeKeyDialog'
 
@@ -26,9 +26,22 @@ export function SettingsPage() {
   const config = data.systemConfig
   const [form, setForm] = useState<WorkspaceSettings>(settings)
   const [changeKeyOpen, setChangeKeyOpen] = useState(false)
-  const [busy, setBusy] = useState(false)
+  // 每个动作独立 pending，避免任一请求结束就提前解锁全部按钮造成重复提交。
+  const [pending, setPending] = useState<Record<string, boolean>>({})
   const [limitValues, setLimitValues] = useState<Record<string, string>>({})
   const [allowPrivateMcp, setAllowPrivateMcp] = useState(false)
+  const [retentionConfirmOpen, setRetentionConfirmOpen] = useState(false)
+
+  const isBusy = (key: string): boolean => Boolean(pending[key])
+
+  const runAction = (key: string, action: () => Promise<unknown>, onSuccess?: () => void): void => {
+    if (pending[key]) return
+    setPending((current) => ({ ...current, [key]: true }))
+    action()
+      .then(() => onSuccess?.())
+      .catch((reason: unknown) => toast.error(asError(reason).message))
+      .finally(() => setPending((current) => ({ ...current, [key]: false })))
+  }
 
   useEffect(() => {
     setForm(settings)
@@ -39,21 +52,7 @@ export function SettingsPage() {
     setAllowPrivateMcp(Boolean((config.limits as Record<string, unknown>).mcpAllowPrivateUrls))
   }, [config])
 
-  const savePrivateMcp = (checked: boolean) => {
-    setAllowPrivateMcp(checked)
-    setBusy(true)
-    api.settings
-      .updateConfigs({ limits: { ...config.limits, mcpAllowPrivateUrls: checked } as unknown as SystemConfig['limits'] })
-      .then(() => toast.success(checked ? '已允许接入本地/内网 MCP' : '已恢复 MCP 公网地址限制'))
-      .catch((reason: unknown) => {
-        setAllowPrivateMcp(!checked)
-        toast.error(asError(reason).message)
-      })
-      .finally(() => setBusy(false))
-  }
-
-  const saveGeneral = () => {
-    setBusy(true)
+  const saveGeneral = () => runAction('general', () =>
     api.settings
       .update({
         workspaceName: form.workspaceName,
@@ -63,19 +62,17 @@ export function SettingsPage() {
         telemetry: form.telemetry,
         autoArchive: form.autoArchive,
       })
-      .then(() => toast.success('常规设置已保存到服务端数据库'))
-      .catch((reason: unknown) => toast.error(asError(reason).message))
-      .finally(() => setBusy(false))
-  }
+      .then(() => toast.success('常规设置已保存到服务端数据库')),
+  )
 
-  const saveRetention = () => {
-    setBusy(true)
+  const applyRetention = () => runAction('retention', () =>
     api.settings
       .update({ retentionDays: form.retentionDays })
-      .then(() => toast.success(`日志保留策略已更新为 ${form.retentionDays} 天`))
-      .catch((reason: unknown) => toast.error(asError(reason).message))
-      .finally(() => setBusy(false))
-  }
+      .then(() => {
+        toast.success(`日志保留策略已更新为 ${form.retentionDays} 天，过期日志已归档后清理`)
+        setRetentionConfirmOpen(false)
+      }),
+  )
 
   const saveConfig = () => {
     const parsed: Record<string, number> = {}
@@ -87,12 +84,11 @@ export function SettingsPage() {
       }
       parsed[item.key] = value
     }
-    setBusy(true)
-    api.settings
-      .updateConfigs({ limits: { ...config.limits, ...parsed } })
-      .then(() => toast.success('系统配置已保存并即时生效'))
-      .catch((reason: unknown) => toast.error(asError(reason).message))
-      .finally(() => setBusy(false))
+    runAction('config', () =>
+      api.settings
+        .updateConfigs({ limits: { ...config.limits, ...parsed } })
+        .then(() => toast.success('系统配置已保存并即时生效')),
+    )
   }
 
   return (
@@ -142,7 +138,7 @@ export function SettingsPage() {
               <Switch label="自动归档历史会话" checked={form.autoArchive} onChange={(checked) => setForm({ ...form, autoArchive: checked })} />
             </div>
           </div>
-          <Button className="mt-4" loading={busy} onClick={saveGeneral}>保存更改</Button>
+          <Button className="mt-4" loading={isBusy('general')} onClick={saveGeneral}>保存更改</Button>
         </SectionCard>
 
         <SectionCard
@@ -164,15 +160,15 @@ export function SettingsPage() {
           <div className="mt-4 flex items-center justify-between gap-4 rounded-field border border-line px-3 py-3">
             <div>
               <p className="text-xs font-medium text-ink">允许接入本地 / 内网 MCP</p>
-              <p className="mt-1 text-2xs text-ink-faint">默认关闭（SSRF 防护）；开启后可接入 127.0.0.1、局域网等自建 MCP 服务</p>
+              <p className="mt-1 text-2xs text-ink-faint">部署期安全开关（SSRF 防护）：仅由服务端环境变量控制，管理面不可修改</p>
             </div>
-            <Switch label="允许接入本地 / 内网 MCP" checked={allowPrivateMcp} onChange={savePrivateMcp} />
+            <Badge tone="neutral">{allowPrivateMcp ? '部署期已开启' : '默认关闭'}</Badge>
           </div>
           <div className="mt-4 flex items-start gap-2 rounded-field bg-brand-faint px-3 py-2.5 text-2xs leading-relaxed text-brand">
             <SlidersHorizontal className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden />
             <span>枚举选项、新建资源默认值与运行时参数同样来自系统配置，可通过 GET / PATCH /api/v1/settings/configs 读取与调整。</span>
           </div>
-          <Button variant="outline" className="mt-4" loading={busy} onClick={saveConfig}>保存系统配置</Button>
+          <Button variant="outline" className="mt-4" loading={isBusy('config')} onClick={saveConfig}>保存系统配置</Button>
         </SectionCard>
 
         <SectionCard title="访问与安全" description="管理界面访问 Key 与平台凭证安全状态">
@@ -205,16 +201,13 @@ export function SettingsPage() {
 
         <SectionCard title="日志与存储" description="保留周期对全部日志统一生效，清理任务按日志时间执行">
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-            <Field label="日志保留周期" htmlFor="setting-retention" hint={`平台推荐 ${config.platform.defaultRetentionDays} 天；选择后立即生效并执行清理任务`}>
+            <Field label="日志保留周期" htmlFor="setting-retention" hint={`平台推荐 ${config.platform.defaultRetentionDays} 天；修改后需点击「保存策略」，清理前会先脱敏归档`}>
               <Select
                 id="setting-retention"
                 value={String(form.retentionDays)}
                 onChange={(event) => {
                   const value = Number(event.target.value)
                   setForm((current) => ({ ...current, retentionDays: value }))
-                  api.settings
-                    .update({ retentionDays: value })
-                    .catch((reason: unknown) => toast.error(asError(reason).message))
                 }}
                 options={config.options.retentionDays.map((day) => ({ value: String(day), label: `${day} 天${day === config.platform.defaultRetentionDays ? '（推荐）' : ''}` }))}
               />
@@ -225,10 +218,27 @@ export function SettingsPage() {
               <p className="mt-1 text-2xs text-ink-muted">按 {form.retentionDays} 天保留策略，过期日志由服务端清理任务删除；导出文件在 {config.limits.exportExpireDays || 7} 天后失效</p>
             </div>
           </div>
-          <Button variant="outline" className="mt-4" loading={busy} onClick={saveRetention}>保存策略</Button>
+          <Button
+            variant="outline"
+            className="mt-4"
+            loading={isBusy('retention')}
+            disabled={isBusy('retention') || form.retentionDays === settings.retentionDays}
+            onClick={() => setRetentionConfirmOpen(true)}
+          >保存策略</Button>
         </SectionCard>
       </div>
 
+      <ConfirmDialog
+        open={retentionConfirmOpen}
+        onClose={() => setRetentionConfirmOpen(false)}
+        onConfirm={applyRetention}
+        title="确认调整日志保留周期"
+        description={`将保留周期调整为 ${form.retentionDays} 天，服务端会立即清理早于该期限的日志。`}
+        confirmText="保存并清理"
+        danger
+        loading={isBusy('retention')}
+        impacts={['过期日志将从列表、搜索与统计中移除', '清理前会先脱敏归档到服务端 var/archive/ 目录', '操作不可撤销，可通过归档文件恢复']}
+      />
       <ChangeKeyDialog open={changeKeyOpen} onClose={() => setChangeKeyOpen(false)} />
     </div>
   )

@@ -7,7 +7,7 @@ import { api } from '../../lib/api'
 import { asError } from '../../lib/errors'
 import { publishChecks } from '../../store/selectors'
 import { useWorkspace } from '../../store/workspace'
-import { Badge, Button, CopyButton, Modal, Switch, toast } from '../../components/ui'
+import { Badge, Button, ConfirmDialog, CopyButton, Modal, Switch, toast } from '../../components/ui'
 import { SectionCard } from '../../components/common/PageHeader'
 import { RevealCredentialButton } from '../../components/common/RevealCredentialButton'
 import { QuickStartCard } from './QuickStartCard'
@@ -60,12 +60,17 @@ function ProtocolCard({
   )
 }
 
+type ConfirmAction =
+  | { type: 'toggle'; target: Protocol; enabled: boolean }
+  | { type: 'reset' }
+
 export function PublishTab({ agentId, dirty }: { agentId: string; dirty: boolean }) {
   const data = useWorkspace()
   const agent = data.agents.find((item) => item.id === agentId)
   const [protocol, setProtocol] = useState<Protocol>('api')
   const [language, setLanguage] = useState<SampleLanguage>('curl')
-  const [busy, setBusy] = useState(false)
+  const [pending, setPending] = useState<Record<string, boolean>>({})
+  const [confirmAction, setConfirmAction] = useState<ConfirmAction | null>(null)
   const [oneTimeKey, setOneTimeKey] = useState<string | null>(null)
   const domain = data.settings.domain
   const issues = agent ? publishChecks(data, agent) : []
@@ -73,34 +78,56 @@ export function PublishTab({ agentId, dirty }: { agentId: string; dirty: boolean
 
   if (!agent) return null
 
-  const toggle = (target: Protocol, enabled: boolean) => {
-    if (enabled && dirty) {
-      toast.error('存在未保存的配置，请先点击「保存配置」后再发布')
-      return
-    }
-    setBusy(true)
-    api.agents
-      .setProtocol(agentId, target, enabled)
-      .then(() => toast.success(`${target === 'api' ? '标准对话 API' : 'AGUI 协议接口'}已${enabled ? '开启' : '关闭'}`))
-      .catch((reason: unknown) => {
-        const message = asError(reason).message
-        console.error('[albedo] 发布开关失败：', message)
-        toast.error(message)
-      })
-      .finally(() => setBusy(false))
+  const isBusy = (key: string): boolean => Boolean(pending[key])
+  const runAction = (key: string, action: () => Promise<unknown>): void => {
+    if (pending[key]) return
+    setPending((current) => ({ ...current, [key]: true }))
+    action()
+      .catch((reason: unknown) => toast.error(asError(reason).message))
+      .finally(() => setPending((current) => ({ ...current, [key]: false })))
   }
 
-  const resetCredential = () => {
-    setBusy(true)
+  const performToggle = (target: Protocol, enabled: boolean) => runAction(`toggle:${target}`, () =>
+    api.agents
+      .setProtocol(agentId, target, enabled)
+      .then(() => toast.success(`${target === 'api' ? '标准对话 API' : 'AGUI 协议接口'}已${enabled ? '开启' : '关闭'}`)),
+  )
+
+  const performReset = () => runAction('reset', () =>
     api.agents
       .resetCredential(agentId)
       .then((full) => {
         setOneTimeKey(full)
         toast.success('访问凭证已重置，旧密钥立即失效')
-      })
-      .catch((reason: unknown) => toast.error(asError(reason).message))
-      .finally(() => setBusy(false))
+      }),
+  )
+
+  const requestToggle = (target: Protocol, enabled: boolean) => {
+    if (enabled && dirty) {
+      toast.error('存在未保存的配置，请先点击「保存配置」后再发布')
+      return
+    }
+    // 关闭对外协议会立即影响已接入的调用方，先确认影响范围。
+    if (!enabled) {
+      setConfirmAction({ type: 'toggle', target, enabled })
+      return
+    }
+    performToggle(target, enabled)
   }
+
+  const confirm = () => {
+    if (!confirmAction) return
+    const action = confirmAction
+    setConfirmAction(null)
+    if (action.type === 'toggle') performToggle(action.target, action.enabled)
+    else performReset()
+  }
+
+  const confirmLoading = confirmAction?.type === 'reset'
+    ? isBusy('reset')
+    : confirmAction
+      ? isBusy(`toggle:${confirmAction.target}`)
+      : false
 
   return (
     <div className="space-y-4">
@@ -110,15 +137,15 @@ export function PublishTab({ agentId, dirty }: { agentId: string; dirty: boolean
             protocol="api"
             enabled={agent.apiEnabled}
             endpoint={endpointOf('api', agentId, domain)}
-            onToggle={(enabled) => toggle('api', enabled)}
-            busy={busy}
+            onToggle={(enabled) => requestToggle('api', enabled)}
+            busy={isBusy('toggle:api')}
           />
           <ProtocolCard
             protocol="agui"
             enabled={agent.aguiEnabled}
             endpoint={endpointOf('agui', agentId, domain)}
-            onToggle={(enabled) => toggle('agui', enabled)}
-            busy={busy}
+            onToggle={(enabled) => requestToggle('agui', enabled)}
+            busy={isBusy('toggle:agui')}
           />
 
           <SectionCard title="访问凭证" description="每个 Agent 使用独立 Bearer Token，与管理访问 Key 隔离">
@@ -130,7 +157,14 @@ export function PublishTab({ agentId, dirty }: { agentId: string; dirty: boolean
                 reveal={() => api.agents.revealCredential(agentId)}
                 title="查看智能体访问凭证"
               />
-              <Button variant="outline" size="sm" icon={<RefreshCw className="h-3 w-3" />} disabled={busy} onClick={resetCredential}>重置密钥</Button>
+              <Button
+                variant="outline"
+                size="sm"
+                icon={<RefreshCw className="h-3 w-3" />}
+                loading={isBusy('reset')}
+                disabled={isBusy('reset')}
+                onClick={() => setConfirmAction({ type: 'reset' })}
+              >重置密钥</Button>
             </div>
             <p className="mt-2.5 flex items-start gap-1.5 text-2xs leading-relaxed text-ink-faint">
               <ShieldCheck className="mt-0.5 h-3 w-3 shrink-0 text-ok" />
@@ -178,6 +212,22 @@ export function PublishTab({ agentId, dirty }: { agentId: string; dirty: boolean
           <p className="text-2xs leading-relaxed text-ink-muted">旧密钥已立即失效。请同步更新所有下游应用与脚本中的 Bearer Token。</p>
         </div>
       </Modal>
+
+      <ConfirmDialog
+        open={confirmAction !== null}
+        onClose={() => setConfirmAction(null)}
+        onConfirm={confirm}
+        title={confirmAction?.type === 'reset' ? '重置访问凭证' : '关闭发布接口'}
+        description={confirmAction?.type === 'reset'
+          ? '重置后旧 Bearer Token 立即失效，所有下游应用与脚本都必须更新密钥。'
+          : '关闭后该协议接口会立即停止对外服务，已接入的调用方将收到错误。'}
+        confirmText={confirmAction?.type === 'reset' ? '重置并生成新密钥' : '确认关闭'}
+        danger
+        loading={confirmLoading}
+        impacts={confirmAction?.type === 'reset'
+          ? ['旧密钥立即失效且不可恢复', '需同步更新所有下游应用与脚本', '重置操作会写入系统审计日志']
+          : ['该协议的对外调用会立即失败', '已发布 Endpoint 不再可用', '可随时重新开启，不影响智能体配置']}
+      />
     </div>
   )
 }

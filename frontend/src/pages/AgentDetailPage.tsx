@@ -6,7 +6,7 @@ import { formatRelative } from '../lib/format'
 import { api } from '../lib/api'
 import { asError } from '../lib/errors'
 import { useUnsavedGuard } from '../hooks/useUnsavedGuard'
-import { agentSessions, isAgentPublished } from '../store/selectors'
+import { agentSessions, isAgentPublished, publishChecks } from '../store/selectors'
 import { useWorkspace } from '../store/workspace'
 import { Button, ConfirmDialog, EmptyState, Tabs, toast } from '../components/ui'
 import { GradientAvatar } from '../components/common/GradientAvatar'
@@ -88,6 +88,13 @@ export function AgentDetailPage() {
 
   const save = () => {
     if (!draft || saving) return
+    const issues = publishChecks(data, draft)
+    if (issues.length > 0) {
+      toast.error(`保存前请修正：${issues[0]}`)
+      if (issues[0].includes('Prompt')) setSection('prompt')
+      else if (issues[0].includes('名称')) setSection('basic')
+      return
+    }
     const { apiEnabled, aguiEnabled, credentialSuffix, sessionCount, testModelId: _testModelId, ...config } = draft
     setSaving(true)
     api.agents

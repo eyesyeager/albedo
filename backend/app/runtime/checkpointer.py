@@ -35,6 +35,20 @@ def is_checkpointer_error(exc: BaseException) -> bool:
     return isinstance(exc, TimeoutError)
 
 
+async def _close_saver(saver: Any | None) -> None:
+    if saver is None:
+        return
+    closer = getattr(saver, "aclose", None) or getattr(saver, "close", None)
+    if closer is None:
+        return
+    try:
+        result = closer()
+        if asyncio.iscoroutine(result):
+            await result
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("关闭 checkpointer 连接失败：%s", exc)
+
+
 async def get_checkpointer() -> Any:
     global _saver, _backend
     if _saver is not None:
@@ -61,15 +75,27 @@ async def get_checkpointer() -> Any:
 
 
 async def degrade_to_memory(reason: str) -> Any:
-    """Redis 运行期失效时切换到进程内 checkpointer，避免整条 Run 直接 500。"""
+    """Redis 运行期失效时切换到进程内 checkpointer，并释放旧连接池。"""
     global _saver, _backend
     async with _lock:
         if _backend == "memory" and _saver is not None:
             return _saver
+        previous = _saver
         _saver = InMemorySaver()
         _backend = "memory"
         logger.warning("runtime checkpointer degraded to memory: %s", reason)
-        return _saver
+    await _close_saver(previous)
+    return _saver
+
+
+async def close_checkpointer() -> None:
+    """应用关闭时释放 checkpointer 连接池，避免 Redis 连接泄漏。"""
+    global _saver, _backend
+    async with _lock:
+        previous = _saver
+        _saver = None
+        _backend = "uninitialized"
+    await _close_saver(previous)
 
 
 def backend_name() -> str:

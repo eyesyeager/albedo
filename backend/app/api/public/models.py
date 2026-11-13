@@ -11,6 +11,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.public.deps import require_publication
 from app.core.errors import ApiException
+from app.core.logging import mask_text
+from app.core.network import assert_public_literal
 from app.core.ratelimit import allow_qpm
 from app.core.security import decrypt_secret, suffix_of
 from app.db import models as m
@@ -129,7 +131,12 @@ async def finish_model_log(
             await db.execute(
                 update(m.LogEntry)
                 .where(m.LogEntry.log_id == log_id)
-                .values(status=status, duration_ms=duration_ms, error_code=error_code, error_message=error_message)
+                .values(
+                    status=status,
+                    duration_ms=duration_ms,
+                    error_code=error_code,
+                    error_message=mask_text(error_message) if error_message else error_message,
+                )
             )
             await db.commit()
     except Exception:  # noqa: BLE001
@@ -141,7 +148,9 @@ async def proxy_stream(url: str, headers: dict[str, str], payload: dict, timeout
     status = "success"
     error_code = None
     error_message = None
-    client = httpx.AsyncClient(timeout=timeout)
+    # 流式分支同样校验，避免绕过上层端点直接复用生成器。
+    assert_public_literal(url)
+    client = httpx.AsyncClient(timeout=timeout, follow_redirects=False)
     try:
         async with client.stream("POST", url, json=payload, headers=headers) as response:
             if response.status_code >= 400:
@@ -149,8 +158,11 @@ async def proxy_stream(url: str, headers: dict[str, str], payload: dict, timeout
                 status = "failed"
                 error_code = "upstream_error" if response.status_code >= 500 else "invalid_request"
                 error_message = f"上游返回 HTTP {response.status_code}"
-                code = error_code
-                raise ApiException(code, error_message, 502 if response.status_code >= 500 else 400)
+                # 200 响应头已经发出，异常处理器无法再改状态码；改成 OpenAI 兼容的
+                # error 帧并正常结束流，客户端至少能看到明确错误而不是 200 + 空流。
+                error_frame = {"error": {"code": error_code, "message": error_message, "type": "upstream_error"}}
+                yield f"data: {json.dumps(error_frame, ensure_ascii=False)}\n\n".encode("utf-8")
+                return
             async for chunk in response.aiter_raw():
                 yield chunk
     except Exception as exc:  # noqa: BLE001
@@ -186,12 +198,17 @@ async def list_models(request: Request, db: AsyncSession = Depends(get_db)) -> d
 @router.post("/chat/completions")
 async def chat_completions(request: Request, db: AsyncSession = Depends(get_db)):
     body = await request.json()
+    if not isinstance(body, dict):
+        raise ApiException("validation_error", "请求体必须是 JSON 对象", 400)
     publication, model, credential = await require_publication(request, db)
     await assert_model_identifier(db, body.get("model"), publication)
     await require_enabled(publication, model)
 
     payload = merge_body(body, publication, model)
     url = f"{model.base_url.rstrip('/')}/chat/completions"
+    # 写入时的 SSRF 校验不能作为唯一防线：库内值可能被旧版本数据或绕过写入篡改。
+    # 每次真实转发前再做一次字面量校验，拦截内网 IP / 元数据域名。
+    assert_public_literal(url)
     upstream_credential = await load_upstream_credential(db, model)
     headers = upstream_headers(model, upstream_credential)
     timeout = max(5, model.timeout_seconds)
@@ -227,6 +244,8 @@ async def chat_completions(request: Request, db: AsyncSession = Depends(get_db))
 @router.post("/embeddings")
 async def embeddings(request: Request, db: AsyncSession = Depends(get_db)):
     body = await request.json()
+    if not isinstance(body, dict):
+        raise ApiException("validation_error", "请求体必须是 JSON 对象", 400)
     publication, model, credential = await require_publication(request, db)
     await assert_model_identifier(db, body.get("model"), publication)
     if model.type != "embedding":
@@ -236,6 +255,7 @@ async def embeddings(request: Request, db: AsyncSession = Depends(get_db)):
     payload = dict(body)
     payload["model"] = model.upstream_model_id
     url = f"{model.base_url.rstrip('/')}/embeddings"
+    assert_public_literal(url)
     upstream_credential = await load_upstream_credential(db, model)
     headers = upstream_headers(model, upstream_credential)
     timeout = max(5, model.timeout_seconds)

@@ -71,19 +71,21 @@ class RuntimeEngine:
         self._checkpointer = None
         return True
 
-    async def clear_thread(self, thread_id: str) -> None:
+    async def clear_thread(self, thread_id: str, agent_id: str = "") -> None:
+        # checkpoint 键带 agent 前缀，清理时必须使用相同的命名空间。
+        key = f"{agent_id}:{thread_id}" if agent_id else thread_id
         saver = await self._get_checkpointer()
         delete = getattr(saver, "adelete_thread", None)
         if delete is not None:
             try:
-                await delete(thread_id)
+                await delete(key)
                 return
             except Exception:  # noqa: BLE001
                 pass
         storage = getattr(saver, "storage", None)
         if isinstance(storage, dict):
-            for key in [key for key in storage if str(key) == thread_id]:
-                storage.pop(key, None)
+            for stored in [item for item in storage if str(item) == key]:
+                storage.pop(stored, None)
 
     def _build_model(self, snapshot: dict, tools: list[BaseTool], rendered: str) -> Any:
         tool_names = [tool.name for tool in tools]
@@ -95,13 +97,15 @@ class RuntimeEngine:
         snapshot = request.snapshot
         advanced: dict[str, Any] = snapshot.get("advanced") or {}
         max_tool_calls = max(1, min(100, int(advanced.get("maxToolCalls", 10))))
-        max_run_seconds = max(0.05, float(advanced.get("maxRunSeconds", 120)))
+        # 运行时长必须有上界，否则会被当作上游读超时并让连接长期零输出。
+        max_run_seconds = min(600.0, max(0.05, float(advanced.get("maxRunSeconds", 120))))
         keep_context = bool(advanced.get("keepContext", True))
         thread_id = request.thread_id if keep_context else f"{request.thread_id}_{request.run_id}"
 
         rendered, missing = render_system_prompt(snapshot, request.variables, strict=request.strict_variables)
         specs = collect_tool_specs(snapshot)
-        tools, spec_by_name = await build_tools(specs, snapshot)
+        # MCP 发现最长可达 600s 且完全不受 maxRunSeconds 约束，必须为准备阶段单独设上限。
+        tools, spec_by_name = await asyncio.wait_for(build_tools(specs, snapshot), timeout=60.0)
         model = self._build_model(snapshot, tools, rendered)
         if tools and hasattr(model, "bind_tools"):
             model = model.bind_tools(tools)
@@ -144,7 +148,9 @@ class RuntimeEngine:
                 for item in (snapshot.get("resolvedMounts") or {}).get("skill") or []
             },
         )
-        config = {"configurable": {"thread_id": thread_id}}
+        # checkpoint 命名空间按智能体隔离：客户端传入的 threadId 在对外响应里保持原样，
+        # 但不同智能体使用相同 threadId 时不能共享同一份历史与上下文。
+        config = {"configurable": {"thread_id": f"{request.agent_id}:{thread_id}"}}
         before = None
         if keep_context:
             try:

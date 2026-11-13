@@ -1,4 +1,5 @@
 import json
+import logging
 from typing import Any
 from urllib.parse import urlparse
 
@@ -52,9 +53,14 @@ def validate_http_url(value: str, message: str) -> str:
 
 
 def read_headers(value: str | None) -> str:
+    """解密自定义头；失败时返回空串，绝不把 Fernet 密文当明文回显或发往上游。"""
     if not value:
         return ""
-    return decrypt_secret(value) or value
+    plaintext = decrypt_secret(value)
+    if plaintext is None:
+        logging.getLogger("albedo.credentials").warning("自定义请求头解密失败，已按空值处理")
+        return ""
+    return plaintext
 
 
 def write_headers(value: str | None) -> str:
@@ -64,8 +70,10 @@ def write_headers(value: str | None) -> str:
 
 
 def model_to_dict(row: m.ModelResource) -> dict[str, Any]:
-    data = row_dict(row, rename={"headers_enc": "headers"})
-    data["headers"] = read_headers(row.headers_enc)
+    # 常规读接口只下发「是否已配置」，不下发解密后的请求头或 Fernet 密文。
+    data = row_dict(row, drop={"headers_enc"})
+    data["headers"] = ""
+    data["headersConfigured"] = bool(row.headers_enc)
     return data
 
 
@@ -78,9 +86,11 @@ def tool_to_dict(row: m.BuiltinTool) -> dict[str, Any]:
 
 
 async def mcp_to_dict(session: AsyncSession, row: m.McpServer) -> dict[str, Any]:
-    data = row_dict(row, rename={"headers_enc": "headers", "env_enc": "env"})
-    data["headers"] = read_headers(row.headers_enc)
-    data["env"] = read_headers(row.env_enc) or ""
+    data = row_dict(row, drop={"headers_enc", "env_enc"})
+    data["headers"] = ""
+    data["env"] = ""
+    data["headersConfigured"] = bool(row.headers_enc)
+    data["envConfigured"] = bool(row.env_enc)
     tools = (await session.scalars(select(m.McpTool).where(m.McpTool.server_id == row.id).order_by(m.McpTool.id))).all()
     data["tools"] = [
         {
@@ -144,6 +154,8 @@ async def store_credential(
             rotated_at=stamp,
             created_at=stamp,
         ))
+        # autoflush=False 下必须显式 flush，否则同事务内后续查询看不到新凭证。
+        await session.flush()
         return
     existing.hash = hash_secret(plain)
     existing.cipher = encrypt_secret(plain)
