@@ -152,10 +152,10 @@ async def test_engine_keep_context_reuses_thread() -> None:
 
 @pytest.mark.asyncio
 async def test_api_test_run_uses_engine_and_persists(client: AsyncClient) -> None:
-    login = await client.post("/api/v1/auth/login", json={"key": DEMO_KEY})
+    login = await client.post("/v1/auth/login", json={"key": DEMO_KEY})
     assert login.status_code == 200
 
-    response = await client.post("/api/v1/agents/agt-research/test-runs", json={
+    response = await client.post("/v1/agents/agt-research/test-runs", json={
         "content": "请分析订单下降的原因",
         "testModelId": "mdl-gpt",
         "threadId": "thd_runtime_api",
@@ -170,10 +170,10 @@ async def test_api_test_run_uses_engine_and_persists(client: AsyncClient) -> Non
     assert body["logs"][-1]["type"] == "session"
     assert body["logs"][-1]["runId"] == body["runId"]
 
-    logs = await client.get("/api/v1/logs", params={"keyword": body["runId"], "range": "1y"})
+    logs = await client.get("/v1/logs", params={"keyword": body["runId"], "range": "1y"})
     assert logs.json()["total"] >= 3
 
-    detail = await client.get("/api/v1/workspace/bootstrap")
+    detail = await client.get("/v1/workspace/bootstrap")
     agent = next(item for item in detail.json()["agents"] if item["id"] == "agt-research")
     assert agent["sessionCount"] >= 1285
 

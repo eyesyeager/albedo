@@ -10,7 +10,7 @@ DEMO_KEY = get_settings().demo_access_key
 
 @pytest.mark.asyncio
 async def test_bootstrap_requires_session(client: AsyncClient) -> None:
-    response = await client.get("/api/v1/workspace/bootstrap")
+    response = await client.get("/v1/workspace/bootstrap")
     assert response.status_code == 401
     assert response.json()["error"]["code"] == "invalid_api_key"
     assert response.json()["error"]["requestId"].startswith("req_")
@@ -18,7 +18,7 @@ async def test_bootstrap_requires_session(client: AsyncClient) -> None:
 
 @pytest.mark.asyncio
 async def test_session_is_false_without_cookie(client: AsyncClient) -> None:
-    response = await client.get("/api/v1/auth/session")
+    response = await client.get("/v1/auth/session")
     assert response.status_code == 200
     assert response.json()["authenticated"] is False
 
@@ -26,15 +26,15 @@ async def test_session_is_false_without_cookie(client: AsyncClient) -> None:
 @pytest.mark.asyncio
 async def test_login_and_bootstrap(client: AsyncClient) -> None:
     await try_delete("albedo:auth:fail:testclient")
-    response = await client.post("/api/v1/auth/login", json={"key": DEMO_KEY})
+    response = await client.post("/v1/auth/login", json={"key": DEMO_KEY})
     assert response.status_code == 200, response.text
     assert response.json()["authenticated"] is True
     assert get_settings().session_cookie_name in response.cookies
 
-    session = await client.get("/api/v1/auth/session")
+    session = await client.get("/v1/auth/session")
     assert session.json()["authenticated"] is True
 
-    bootstrap = await client.get("/api/v1/workspace/bootstrap")
+    bootstrap = await client.get("/v1/workspace/bootstrap")
     assert bootstrap.status_code == 200, bootstrap.text
     data = WorkspaceData.model_validate(bootstrap.json())
     assert len(data.agents) >= 4
@@ -45,25 +45,25 @@ async def test_login_and_bootstrap(client: AsyncClient) -> None:
     assert "accessKey" not in bootstrap.json()["settings"]
     assert any(agent.id == "agt-research" for agent in data.agents)
     assert data.logs and len(data.logs) <= 50
-    assert (await client.get("/api/v1/logs/log-1001")).status_code == 200
+    assert (await client.get("/v1/logs/log-1001")).status_code == 200
     assert len(data.trends.d30) == 30
 
-    logout = await client.post("/api/v1/auth/logout")
+    logout = await client.post("/v1/auth/logout")
     assert logout.status_code == 200
-    assert (await client.get("/api/v1/auth/session")).json()["authenticated"] is False
+    assert (await client.get("/v1/auth/session")).json()["authenticated"] is False
 
 
 @pytest.mark.asyncio
 async def test_invalid_key_and_rate_limit(client: AsyncClient) -> None:
     await try_delete("albedo:auth:fail:testclient")
     for _ in range(5):
-        failed = await client.post("/api/v1/auth/login", json={"key": "wrong-key-123456789"})
+        failed = await client.post("/v1/auth/login", json={"key": "wrong-key-123456789"})
         assert failed.status_code == 401
         assert failed.json()["error"]["code"] == "invalid_api_key"
-    limited = await client.post("/api/v1/auth/login", json={"key": "wrong-key-123456789"})
+    limited = await client.post("/v1/auth/login", json={"key": "wrong-key-123456789"})
     assert limited.status_code == 429
     assert limited.json()["error"]["code"] == "rate_limit_exceeded"
     await try_delete("albedo:auth:fail:testclient")
 
-    success = await client.post("/api/v1/auth/login", json={"key": DEMO_KEY})
+    success = await client.post("/v1/auth/login", json={"key": DEMO_KEY})
     assert success.status_code == 200

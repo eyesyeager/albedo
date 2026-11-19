@@ -103,17 +103,17 @@ async def test_signed_download_url(monkeypatch) -> None:
 
 @pytest.mark.asyncio
 async def test_concurrent_agent_update_conflict(client: AsyncClient) -> None:
-    login = await client.post("/api/v1/auth/login", json={"key": DEMO_KEY})
+    login = await client.post("/v1/auth/login", json={"key": DEMO_KEY})
     assert login.status_code == 200
-    created = await client.post("/api/v1/agents", json={
+    created = await client.post("/v1/agents", json={
         "name": "并发测试智能体", "defaultModelId": "mdl-gpt", "systemPrompt": "你是并发测试助手。",
     })
     agent_id = created.json()["entity"]["id"]
 
     async def rename(name: str):
-        return await client.patch(f"/api/v1/agents/{agent_id}", json={"name": name, "expectedVersion": 1})
+        return await client.patch(f"/v1/agents/{agent_id}", json={"name": name, "expectedVersion": 1})
 
     first, second = await asyncio.gather(rename("并发 A"), rename("并发 B"))
     assert sorted([first.status_code, second.status_code]) == [200, 409]
 
-    await client.delete(f"/api/v1/agents/{agent_id}")
+    await client.delete(f"/v1/agents/{agent_id}")

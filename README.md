@@ -57,9 +57,9 @@ npm run contracts   # 重新导出 OpenAPI 契约快照
 
 ```bash
 cd backend
-uv sync                        # 生成 .venv 与 uv.lock
-cp .env.example .env           # 按 docs/运维信息.md 填写连接串（.env 已被忽略）
-python scripts/init_db.py      # 真实建表 + 写入系统配置与内置工具目录 + 逐表校验
+uv sync                              # 生成 .venv 与 uv.lock
+cp config.example.yml config.yml     # 按 docs/运维信息.md 填写连接串（config.yml 已被忽略）
+python scripts/init_db.py            # 真实建表 + 写入系统配置与内置工具目录 + 逐表校验
 uv run uvicorn app.main:app --reload --port 8000
 ```
 

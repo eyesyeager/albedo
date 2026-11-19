@@ -168,11 +168,11 @@ async def test_l3_script_really_executes_in_sandbox(tmp_path: Path, monkeypatch)
 @pytest.mark.asyncio
 async def test_upload_skill_md_package_extracts_l1_and_l2(client: AsyncClient) -> None:
     """端到端：包内 SKILL.md 成为 L1 触发面与 L2 正文，不再依赖手填说明。"""
-    response = await client.post("/api/v1/auth/login", json={"key": get_settings().demo_access_key})
+    response = await client.post("/v1/auth/login", json={"key": get_settings().demo_access_key})
     assert response.status_code == 200, response.text
     payload = make_package()
     created = await client.post(
-        "/api/v1/skills",
+        "/v1/skills",
         data={"name": "PDF 处理", "fileName": "pdf-processing.zip", "sizeBytes": len(payload)},
         files={"file": ("pdf-processing.zip", payload, "application/zip")},
     )

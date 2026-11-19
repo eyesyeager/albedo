@@ -1,0 +1,34 @@
+# Albedo 仅后端服务部署（数据库/表结构/数据已由外部建好，MySQL/Redis 均已外部部署）
+#   1. cp backend/config.example.yml backend/config.yml  # 填入真实值
+#   2. docker compose -f docker-compose.backend.yml up -d --build
+#
+# 配置已随镜像内置（backend/config.yml），运行时零环境变量。
+# 如需运行时覆盖敏感项（推荐），可取消 backend.env_file 注释并准备 deploy/.env，
+# 或直接用 `docker run -e SECRET_KEY=... -e DATABASE_URL=...`。
+# 不启动 worker / init / mysql / redis；业务状态在外部 MySQL、Redis、COS 与 backend_var volume。
+
+name: albedo-backend
+
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    image: albedo-backend:local
+    # 运行时覆盖敏感项时打开下面一行（deploy/.env 只放需要覆盖的变量即可）：
+    # env_file: ./deploy/.env
+    ports:
+      - "${BACKEND_BIND:-127.0.0.1}:${BACKEND_PORT:-8000}:8000"
+    volumes:
+      - backend_var:/app/backend/var
+    restart: unless-stopped
+    logging: *default-logging
+
+volumes:
+  backend_var:

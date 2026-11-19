@@ -13,13 +13,13 @@ from app.core.config import get_settings  # noqa: E402
 BASE = "http://127.0.0.1:8000"
 CONCURRENCY = 20
 ROUNDS = 5
-PATHS = ("/api/v1/logs?page=1&pageSize=20", "/api/v1/workspace/bootstrap")
+PATHS = ("/v1/logs?page=1&pageSize=20", "/v1/workspace/bootstrap")
 
 
 async def main() -> None:
     settings = get_settings()
     async with httpx.AsyncClient(base_url=BASE, timeout=30) as client:
-        login = await client.post("/api/v1/auth/login", json={"key": settings.demo_access_key})
+        login = await client.post("/v1/auth/login", json={"key": settings.demo_access_key})
         if login.status_code != 200:
             raise SystemExit(f"login failed: {login.status_code}")
 

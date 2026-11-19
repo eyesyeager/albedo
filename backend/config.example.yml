@@ -1,0 +1,72 @@
+# Albedo 后端配置模板。
+# 用法：cp config.example.yml config.yml，填入真实值后再构建 Docker 镜像。
+# 加载优先级：环境变量 > 本文件 > 代码默认值（见 app/core/config.py）。
+#
+# 安全提示：本文件会被 Dockerfile 打进镜像。凡标注「敏感」的项，
+# 建议在 yml 中留空、改由环境变量在运行时注入（docker run -e 或 --env-file），
+# 不要把明文凭据固化进镜像层。config.yml 已被 .gitignore 排除，切勿提交仓库。
+
+# ============ 连接与凭据（敏感）============
+database_url: ""            # mysql+aiomysql://user:pass@host:3306/albedo，密码特殊字符需 URL 编码
+redis_url: ""               # redis://:pass@host:6379/0
+checkpoint_backend: redis   # redis | memory
+
+secret_key: ""              # Fernet.generate_key() 生成，固定并备份；轮换后已加密数据不可解密
+secret_key_previous: ""     # 轮换密钥时的旧值，仅用于解密历史密文
+
+demo_access_key: ""         # 管理面初始访问 Key，非演示值
+
+# ============ 上游模型（production 强制非空）============
+llm_base_url: ""
+llm_api_key: ""
+llm_model: ""
+llm_timeout_seconds: 60
+llm_temperature: 0.7
+vision_model: ""            # 留空复用 llm_model
+
+# ============ Skill 对象存储（腾讯云 COS）============
+skill_storage: cos          # cos | local；单机/未配 COS 时用 local
+cos_bucket: albedo-1305182252
+cos_region: ap-nanjing
+cos_secret_id: ""           # 敏感
+cos_secret_key: ""          # 敏感
+cos_token: ""
+cos_endpoint: ""
+cos_scheme: https
+cos_prefix: skills
+cos_timeout_seconds: 30
+
+# ============ 站点与安全 ============
+environment: production     # 非 dev 即按生产校验
+platform_domain: https://your.domain
+cors_origins: ""            # 逗号分隔，生产必填且禁止 *
+cookie_secure: true
+csrf_enabled: true
+trust_proxy_headers: false
+
+# ============ 会话与限流 ============
+session_idle_hours: 2
+session_absolute_hours: 24
+login_max_failures: 5
+login_lock_seconds: 30
+
+# ============ 内置工具 ============
+search_provider: bing       # bing | duckduckgo | tavily | serper | off
+search_api_key: ""          # 敏感（按 search_provider 选填）
+search_max_results: 5
+http_allow_hosts: ""        # 逗号分隔域名白名单，空=任意公网域名
+http_timeout_seconds: 15
+http_max_response_bytes: 524288
+tool_upload_max_bytes: 10485760
+
+# 沙箱与 stdio MCP：默认关闭，生产开启需配合容器/seccomp 隔离
+sandbox_enabled: false
+sandbox_timeout_seconds: 8
+sandbox_memory_mb: 256
+sandbox_max_output_chars: 8000
+mcp_stdio_enabled: false
+mcp_stdio_allowed_commands: ""
+
+# ============ 其它 ============
+max_request_body_bytes: 2097152
+platform_timezone: Asia/Shanghai

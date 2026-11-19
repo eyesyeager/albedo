@@ -1,6 +1,6 @@
 import type { SystemConfig, WorkspaceData } from '../types/domain'
 
-/** 启动前的技术性空壳；真实取值一律由 /api/v1/workspace/bootstrap 下发的 systemConfig 覆盖。 */
+/** 启动前的技术性空壳；真实取值一律由 /v1/workspace/bootstrap 下发的 systemConfig 覆盖。 */
 export function defaultSystemConfig(): SystemConfig {
   return {
     platform: {

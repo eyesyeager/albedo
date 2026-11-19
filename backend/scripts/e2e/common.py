@@ -129,7 +129,7 @@ def new_client() -> httpx.AsyncClient:
 
 async def login(rec: Recorder, client: httpx.AsyncClient) -> bool:
     response = await rec.call(
-        client, "auth", "管理面登录", "POST", "/api/v1/auth/login",
+        client, "auth", "管理面登录", "POST", "/v1/auth/login",
         json={"key": DEMO_KEY},
     )
     return bool(response and response.status_code == 200)

@@ -364,7 +364,7 @@ export const api = {
       }
       if (!result) throw new Error('日志导出任务未完成，请稍后在导出记录中重试')
       const downloadPath = result.downloadUrl
-        ? result.downloadUrl.replace('/api/v1', '')
+        ? result.downloadUrl.replace('/v1', '')
         : `/logs/exports/${created.id}/download`
       const blob = await httpBlob(downloadPath)
       downloadBlob(blob, `albedo-logs-${created.id}.${format}`)

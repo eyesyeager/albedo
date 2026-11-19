@@ -5,7 +5,10 @@ FROM python:3.12-slim
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     PIP_NO_CACHE_DIR=1 \
-    UV_PROJECT_ENVIRONMENT=/app/backend/.venv
+    PIP_INDEX_URL=https://mirrors.cloud.tencent.com/pypi/simple \
+    UV_PROJECT_ENVIRONMENT=/app/backend/.venv \
+    UV_DEFAULT_INDEX=https://mirrors.cloud.tencent.com/pypi/simple \
+    UV_HTTP_TIMEOUT=120
 
 WORKDIR /app/backend
 
@@ -13,7 +16,8 @@ WORKDIR /app/backend
 RUN pip install --no-cache-dir uv==0.12.15
 
 COPY backend/pyproject.toml backend/uv.lock ./
-RUN uv sync --frozen --no-dev --no-install-project
+# 缓存挂载：依赖层的下载缓存在多次构建间复用，lock 未变时整层直接命中缓存
+RUN --mount=type=cache,target=/root/.cache/uv uv sync --frozen --no-dev --no-install-project
 
 COPY backend/ ./
 

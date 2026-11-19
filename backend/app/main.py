@@ -102,7 +102,7 @@ async def no_store_management_responses(request: Request, call_next):
     """管理面响应一律禁止缓存：常规资源接口与写响应可能含凭据、配置与审计数据。"""
     response = await call_next(request)
     content_type = response.headers.get("content-type", "")
-    if request.url.path.startswith("/api/v1/") and "text/event-stream" not in content_type:
+    if request.url.path.startswith("/v1/") and "text/event-stream" not in content_type:
         response.headers["Cache-Control"] = "no-store, private"
     return response
 
@@ -117,9 +117,9 @@ app.add_middleware(
 )
 install_error_handlers(app)
 
-app.include_router(v1_router, prefix="/api/v1")
-app.include_router(public_router, prefix="/v1")
-app.include_router(agui_router, prefix="/api/agui/v1")
+app.include_router(v1_router, prefix="/v1")
+app.include_router(public_router, prefix="/openai/v1")
+app.include_router(agui_router, prefix="/agui/v1")
 
 
 @app.get("/health", tags=["meta"], summary="健康检查")

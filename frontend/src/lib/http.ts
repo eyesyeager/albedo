@@ -5,7 +5,7 @@ import { defaultSystemConfig, emptyWorkspace } from './defaults'
 import { useAuth } from '../store/auth'
 import { useWorkspace } from '../store/workspace'
 
-const BASE = '/api/v1'
+const BASE = '/v1'
 
 function readCookie(name: string): string {
   const match = document.cookie.match(new RegExp(`(?:^|;\\s*)${name}=([^;]*)`))

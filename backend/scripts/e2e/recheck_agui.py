@@ -14,12 +14,12 @@ async def main() -> int:
     agent_id = sys.argv[1]
     rec = Recorder()
     async with new_client() as admin:
-        await admin.post("/api/v1/auth/login", json={"key": DEMO_KEY})
-        await admin.patch(f"/api/v1/agents/{agent_id}", json={
+        await admin.post("/v1/auth/login", json={"key": DEMO_KEY})
+        await admin.patch(f"/v1/agents/{agent_id}", json={
             "advanced": {"keepContext": True, "autoRetry": True, "outputThinkingSummary": False,
                          "maxToolCalls": 10, "maxRunSeconds": 300},
         })
-        reset = await admin.post(f"/api/v1/agents/{agent_id}/credential/reset")
+        reset = await admin.post(f"/v1/agents/{agent_id}/credential/reset")
         print("credential reset", reset.status_code)
         token = reset.json()["fullKey"]
     rec.state["agent_id"] = agent_id

@@ -166,7 +166,7 @@ export function SettingsPage() {
           </div>
           <div className="mt-4 flex items-start gap-2 rounded-field bg-brand-faint px-3 py-2.5 text-2xs leading-relaxed text-brand">
             <SlidersHorizontal className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden />
-            <span>枚举选项、新建资源默认值与运行时参数同样来自系统配置，可通过 GET / PATCH /api/v1/settings/configs 读取与调整。</span>
+            <span>枚举选项、新建资源默认值与运行时参数同样来自系统配置，可通过 GET / PATCH /v1/settings/configs 读取与调整。</span>
           </div>
           <Button variant="outline" className="mt-4" loading={isBusy('config')} onClick={saveConfig}>保存系统配置</Button>
         </SectionCard>

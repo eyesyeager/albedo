@@ -15,7 +15,7 @@ async def run(rec: Recorder) -> None:
         return
 
     headers = {"Authorization": f"Bearer {token}"}
-    path = f"/api/agui/v1/agents/{agent_id}/run"
+    path = f"/agui/v1/agents/{agent_id}/run"
     run_id = qa("run-agui")
 
     async with new_client() as client:
@@ -86,12 +86,12 @@ async def run(rec: Recorder) -> None:
         other_token = rec.state.get("unpublished_token", "")
         if unpublished_id and not other_token:
             async with new_client() as admin:
-                await admin.post("/api/v1/auth/login", json={"key": DEMO_KEY}, timeout=30)
-                reset = await admin.post(f"/api/v1/agents/{unpublished_id}/credential/reset", timeout=30)
+                await admin.post("/v1/auth/login", json={"key": DEMO_KEY}, timeout=30)
+                reset = await admin.post(f"/v1/agents/{unpublished_id}/credential/reset", timeout=30)
                 if reset.status_code == 200:
                     other_token = reset.json().get("fullKey", "")
         if unpublished_id and other_token:
-            await rec.call(client, "agui", "AGUI 协议未开启拒绝", "POST", f"/api/agui/v1/agents/{unpublished_id}/run", expected=409,
+            await rec.call(client, "agui", "AGUI 协议未开启拒绝", "POST", f"/agui/v1/agents/{unpublished_id}/run", expected=409,
                            headers={"Authorization": f"Bearer {other_token}"},
                            json={"threadId": "QA-thd", "runId": qa("run-disabled"), "messages": [{"id": "m1", "role": "user", "content": "hi"}]})
         else:
@@ -100,7 +100,7 @@ async def run(rec: Recorder) -> None:
         # QPM 限流：用不触发模型的无效请求快速打满 60 次固定窗口，放在最后避免影响其它用例
         async def probe() -> int:
             try:
-                response = await client.post(f"/v1/agents/{agent_id}/chat", headers=headers, timeout=30,
+                response = await client.post(f"/openai/v1/agents/{agent_id}/chat", headers=headers, timeout=30,
                                             json={"messages": []})
                 return response.status_code
             except Exception:  # noqa: BLE001

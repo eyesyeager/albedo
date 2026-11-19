@@ -76,7 +76,7 @@ export function PublishVersionDialog({ model, open, onClose }: { model: ModelRes
       .finally(() => setBusy(false))
   }
 
-  const baseUrl = `${domain.replace(/\/$/, '')}/v1`
+  const baseUrl = `${domain.replace(/\/$/, '')}/openai/v1`
 
   const curlSnippet = (callIdentifier: string, key: string): string => {
     const endpoint = model.type === 'embedding' ? 'embeddings' : 'chat/completions'

@@ -1,4 +1,4 @@
-"""对外面 /v1/** 在线测试：Bearer 鉴权、真实上游透传、真增量 SSE 与错误码。"""
+"""对外面 /openai/v1/** 在线测试：Bearer 鉴权、真实上游透传、真增量 SSE 与错误码。"""
 from __future__ import annotations
 
 import uuid
@@ -21,7 +21,7 @@ async def run(rec: Recorder) -> None:
         return
 
     headers = {"Authorization": f"Bearer {token}"}
-    chat_path = f"/v1/agents/{agent_id}/chat"
+    chat_path = f"/openai/v1/agents/{agent_id}/chat"
 
     async with new_client() as client:
         async def hit(name: str, method: str, path: str, expected=200, **kw) -> httpx.Response | None:
@@ -29,7 +29,7 @@ async def run(rec: Recorder) -> None:
 
         await hit("Agent chat 无 Token 拒绝", "POST", chat_path, expected=401, json={"messages": [{"role": "user", "content": "hi"}]})
         await hit("Agent chat 错误 Token 拒绝", "POST", chat_path, expected=401, headers={"Authorization": "Bearer alb_agt_QA_invalid_0000"}, json={"messages": [{"role": "user", "content": "hi"}]})
-        await hit("Agent chat 跨 Agent 拒绝", "POST", f"/v1/agents/{unpublished_id or 'QA-other'}/chat", expected=403, headers=headers, json={"messages": [{"role": "user", "content": "hi"}]})
+        await hit("Agent chat 跨 Agent 拒绝", "POST", f"/openai/v1/agents/{unpublished_id or 'QA-other'}/chat", expected=403, headers=headers, json={"messages": [{"role": "user", "content": "hi"}]})
         await hit("Agent chat 缺少 user 内容", "POST", chat_path, expected=400, headers=headers, json={"messages": [{"role": "assistant", "content": "hi"}]})
 
         result = await hit("Agent chat JSON（真实模型）", "POST", chat_path, expected=(200, 500, 502, 504), headers=headers, json={
@@ -72,12 +72,12 @@ async def run(rec: Recorder) -> None:
         if unpublished_id:
             # 为未发布的 QA Agent 单独签发 Token，验证协议开关
             async with new_client() as admin:
-                await admin.post("/api/v1/auth/login", json={"key": DEMO_KEY}, timeout=30)
-                reset = await admin.post(f"/api/v1/agents/{unpublished_id}/credential/reset", timeout=30)
+                await admin.post("/v1/auth/login", json={"key": DEMO_KEY}, timeout=30)
+                reset = await admin.post(f"/v1/agents/{unpublished_id}/credential/reset", timeout=30)
                 if reset.status_code == 200:
                     other_token = reset.json().get("fullKey", "")
                     rec.state["unpublished_token"] = other_token
-                    await hit("未发布 Agent 调用拒绝", "POST", f"/v1/agents/{unpublished_id}/chat", expected=409,
+                    await hit("未发布 Agent 调用拒绝", "POST", f"/openai/v1/agents/{unpublished_id}/chat", expected=409,
                               headers={"Authorization": f"Bearer {other_token}"},
                               json={"messages": [{"role": "user", "content": "hi"}]})
 
@@ -86,18 +86,18 @@ async def run(rec: Recorder) -> None:
             rec.skip("public", "模型透传全部用例", "管理面未成功签发 QA 发布版本 Key")
             return
         pub_headers = {"Authorization": f"Bearer {publication_token}"}
-        await hit("列出可用模型（无 Key）", "GET", "/v1/models", expected=401)
-        models = await hit("列出可用模型", "GET", "/v1/models", headers=pub_headers)
+        await hit("列出可用模型（无 Key）", "GET", "/openai/v1/models", expected=401)
+        models = await hit("列出可用模型", "GET", "/openai/v1/models", headers=pub_headers)
         if models and models.status_code == 200:
             rec.note("public", "模型列表返回 QA 发布标识", any(item.get("id") == call_identifier for item in models.json().get("data", [])), f"callIdentifier={call_identifier}")
-        await hit("chat/completions 错误模型拒绝", "POST", "/v1/chat/completions", expected=403, headers=pub_headers,
+        await hit("chat/completions 错误模型拒绝", "POST", "/openai/v1/chat/completions", expected=403, headers=pub_headers,
                   json={"model": "QA-not-allowed", "messages": [{"role": "user", "content": "hi"}]})
-        await hit("chat/completions 无 Key 拒绝", "POST", "/v1/chat/completions", expected=401,
+        await hit("chat/completions 无 Key 拒绝", "POST", "/openai/v1/chat/completions", expected=401,
                   json={"model": call_identifier, "messages": [{"role": "user", "content": "hi"}]})
-        await hit("chat/completions 真实上游透传", "POST", "/v1/chat/completions", expected=(200, 400, 502, 504), headers=pub_headers,
+        await hit("chat/completions 真实上游透传", "POST", "/openai/v1/chat/completions", expected=(200, 400, 502, 504), headers=pub_headers,
                   json={"model": call_identifier, "messages": [{"role": "user", "content": "请回复 OK 两个字母"}], "max_tokens": 32})
-        await hit("embeddings 类型不匹配拒绝", "POST", "/v1/embeddings", expected=(400, 403, 404), headers=pub_headers,
+        await hit("embeddings 类型不匹配拒绝", "POST", "/openai/v1/embeddings", expected=(400, 403, 404), headers=pub_headers,
                   json={"model": call_identifier, "input": "QA embedding test"})
-        await hit("embeddings 无 Key 拒绝", "POST", "/v1/embeddings", expected=401,
+        await hit("embeddings 无 Key 拒绝", "POST", "/openai/v1/embeddings", expected=401,
                   json={"model": call_identifier, "input": "QA embedding test"})
-        await hit("请求体缺字段拒绝", "POST", "/v1/chat/completions", expected=(400, 422), headers=pub_headers, json={"model": call_identifier})
+        await hit("请求体缺字段拒绝", "POST", "/openai/v1/chat/completions", expected=(400, 422), headers=pub_headers, json={"model": call_identifier})

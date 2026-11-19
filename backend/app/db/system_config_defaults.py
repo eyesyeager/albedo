@@ -1,7 +1,7 @@
 """系统配置初始化值。
 
 仅在首次初始化（或管理员显式恢复默认）时写入 `system_configs` 表。
-运行期一律以数据库里的值为准，可通过 `GET/PATCH /api/v1/settings/configs` 读取与修改。
+运行期一律以数据库里的值为准，可通过 `GET/PATCH /v1/settings/configs` 读取与修改。
 """
 
 from typing import Any

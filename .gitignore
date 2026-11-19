@@ -12,6 +12,7 @@ yarn-error.log*
 
 # 后端运行时产物与本地密钥
 backend/.env
+backend/config.yml
 backend/var/
 backend/.venv/
 __pycache__/

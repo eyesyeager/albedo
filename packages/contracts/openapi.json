@@ -6,7 +6,7 @@
     "version": "1.0.0"
   },
   "paths": {
-    "/api/v1/meta": {
+    "/v1/meta": {
       "get": {
         "tags": [
           "meta"
@@ -27,7 +27,7 @@
         }
       }
     },
-    "/api/v1/auth/login": {
+    "/v1/auth/login": {
       "post": {
         "tags": [
           "auth"
@@ -68,7 +68,7 @@
         }
       }
     },
-    "/api/v1/auth/logout": {
+    "/v1/auth/logout": {
       "post": {
         "tags": [
           "auth"
@@ -89,7 +89,7 @@
         }
       }
     },
-    "/api/v1/auth/session": {
+    "/v1/auth/session": {
       "get": {
         "tags": [
           "auth"
@@ -110,7 +110,7 @@
         }
       }
     },
-    "/api/v1/workspace/bootstrap": {
+    "/v1/workspace/bootstrap": {
       "get": {
         "tags": [
           "workspace"
@@ -131,7 +131,7 @@
         }
       }
     },
-    "/api/v1/models": {
+    "/v1/models": {
       "get": {
         "tags": [
           "models"
@@ -195,7 +195,7 @@
         }
       }
     },
-    "/api/v1/models/test": {
+    "/v1/models/test": {
       "post": {
         "tags": [
           "models"
@@ -236,7 +236,7 @@
         }
       }
     },
-    "/api/v1/models/{model_id}/test": {
+    "/v1/models/{model_id}/test": {
       "post": {
         "tags": [
           "models"
@@ -278,7 +278,7 @@
         }
       }
     },
-    "/api/v1/models/{model_id}": {
+    "/v1/models/{model_id}": {
       "get": {
         "tags": [
           "models"
@@ -410,7 +410,7 @@
         }
       }
     },
-    "/api/v1/models/{model_id}/credential": {
+    "/v1/models/{model_id}/credential": {
       "get": {
         "tags": [
           "models"
@@ -452,7 +452,7 @@
         }
       }
     },
-    "/api/v1/models/{model_id}/enabled": {
+    "/v1/models/{model_id}/enabled": {
       "patch": {
         "tags": [
           "models"
@@ -504,7 +504,7 @@
         }
       }
     },
-    "/api/v1/mcps": {
+    "/v1/mcps": {
       "get": {
         "tags": [
           "mcps"
@@ -568,7 +568,7 @@
         }
       }
     },
-    "/api/v1/mcps/test": {
+    "/v1/mcps/test": {
       "post": {
         "tags": [
           "mcps"
@@ -609,7 +609,7 @@
         }
       }
     },
-    "/api/v1/mcps/{mcp_id}/test": {
+    "/v1/mcps/{mcp_id}/test": {
       "post": {
         "tags": [
           "mcps"
@@ -651,7 +651,7 @@
         }
       }
     },
-    "/api/v1/mcps/{mcp_id}": {
+    "/v1/mcps/{mcp_id}": {
       "get": {
         "tags": [
           "mcps"
@@ -783,7 +783,7 @@
         }
       }
     },
-    "/api/v1/mcps/{mcp_id}/calls": {
+    "/v1/mcps/{mcp_id}/calls": {
       "get": {
         "tags": [
           "mcps"
@@ -827,7 +827,7 @@
         }
       }
     },
-    "/api/v1/mcps/{mcp_id}/enabled": {
+    "/v1/mcps/{mcp_id}/enabled": {
       "patch": {
         "tags": [
           "mcps"
@@ -879,7 +879,7 @@
         }
       }
     },
-    "/api/v1/mcps/{mcp_id}/tools/{tool_id}": {
+    "/v1/mcps/{mcp_id}/tools/{tool_id}": {
       "patch": {
         "tags": [
           "mcps"
@@ -940,7 +940,7 @@
         }
       }
     },
-    "/api/v1/mcps/{mcp_id}/tools/{tool_id}/test": {
+    "/v1/mcps/{mcp_id}/tools/{tool_id}/test": {
       "post": {
         "tags": [
           "mcps"
@@ -1001,7 +1001,7 @@
         }
       }
     },
-    "/api/v1/mcps/{mcp_id}/tools/{tool_id}/schema": {
+    "/v1/mcps/{mcp_id}/tools/{tool_id}/schema": {
       "post": {
         "tags": [
           "mcps"
@@ -1054,7 +1054,7 @@
         }
       }
     },
-    "/api/v1/mcps/{mcp_id}/usage": {
+    "/v1/mcps/{mcp_id}/usage": {
       "patch": {
         "tags": [
           "mcps"
@@ -1106,7 +1106,7 @@
         }
       }
     },
-    "/api/v1/skills": {
+    "/v1/skills": {
       "get": {
         "tags": [
           "skills"
@@ -1170,7 +1170,7 @@
         }
       }
     },
-    "/api/v1/skills/{skill_id}/versions": {
+    "/v1/skills/{skill_id}/versions": {
       "post": {
         "tags": [
           "skills"
@@ -1222,7 +1222,7 @@
         }
       }
     },
-    "/api/v1/skills/{skill_id}": {
+    "/v1/skills/{skill_id}": {
       "get": {
         "tags": [
           "skills"
@@ -1304,7 +1304,7 @@
         }
       }
     },
-    "/api/v1/tools": {
+    "/v1/tools": {
       "get": {
         "tags": [
           "tools"
@@ -1329,7 +1329,7 @@
         }
       }
     },
-    "/api/v1/tools/{tool_id}/enabled": {
+    "/v1/tools/{tool_id}/enabled": {
       "patch": {
         "tags": [
           "tools"
@@ -1381,7 +1381,7 @@
         }
       }
     },
-    "/api/v1/resources/{kind}/{resource_id}/impact": {
+    "/v1/resources/{kind}/{resource_id}/impact": {
       "get": {
         "tags": [
           "resources"
@@ -1432,7 +1432,7 @@
         }
       }
     },
-    "/api/v1/agents": {
+    "/v1/agents": {
       "get": {
         "tags": [
           "agents"
@@ -1496,7 +1496,7 @@
         }
       }
     },
-    "/api/v1/agents/{agent_id}": {
+    "/v1/agents/{agent_id}": {
       "get": {
         "tags": [
           "agents"
@@ -1644,7 +1644,7 @@
         }
       }
     },
-    "/api/v1/agents/{agent_id}/credential": {
+    "/v1/agents/{agent_id}/credential": {
       "get": {
         "tags": [
           "agents"
@@ -1686,7 +1686,7 @@
         }
       }
     },
-    "/api/v1/agents/{agent_id}/publish-check": {
+    "/v1/agents/{agent_id}/publish-check": {
       "post": {
         "tags": [
           "agents"
@@ -1728,7 +1728,7 @@
         }
       }
     },
-    "/api/v1/agents/{agent_id}/protocols": {
+    "/v1/agents/{agent_id}/protocols": {
       "patch": {
         "tags": [
           "agents"
@@ -1780,7 +1780,7 @@
         }
       }
     },
-    "/api/v1/agents/{agent_id}/credential/reset": {
+    "/v1/agents/{agent_id}/credential/reset": {
       "post": {
         "tags": [
           "agents"
@@ -1822,7 +1822,7 @@
         }
       }
     },
-    "/api/v1/agents/{agent_id}/history": {
+    "/v1/agents/{agent_id}/history": {
       "get": {
         "tags": [
           "agents"
@@ -1864,7 +1864,7 @@
         }
       }
     },
-    "/api/v1/agents/{agent_id}/test-runs": {
+    "/v1/agents/{agent_id}/test-runs": {
       "post": {
         "tags": [
           "agents"
@@ -1916,7 +1916,7 @@
         }
       }
     },
-    "/api/v1/agents/{agent_id}/test-session": {
+    "/v1/agents/{agent_id}/test-session": {
       "delete": {
         "tags": [
           "agents"
@@ -1960,7 +1960,7 @@
         }
       }
     },
-    "/api/v1/models/{model_id}/publications": {
+    "/v1/models/{model_id}/publications": {
       "get": {
         "tags": [
           "publications"
@@ -2056,7 +2056,7 @@
         }
       }
     },
-    "/api/v1/publications/{publication_id}/credential": {
+    "/v1/publications/{publication_id}/credential": {
       "get": {
         "tags": [
           "publications"
@@ -2098,7 +2098,7 @@
         }
       }
     },
-    "/api/v1/publications/{publication_id}": {
+    "/v1/publications/{publication_id}": {
       "patch": {
         "tags": [
           "publications"
@@ -2190,7 +2190,7 @@
         }
       }
     },
-    "/api/v1/publications/{publication_id}/key/rotate": {
+    "/v1/publications/{publication_id}/key/rotate": {
       "post": {
         "tags": [
           "publications"
@@ -2246,7 +2246,7 @@
         }
       }
     },
-    "/api/v1/logs": {
+    "/v1/logs": {
       "get": {
         "tags": [
           "logs"
@@ -2362,7 +2362,7 @@
         }
       }
     },
-    "/api/v1/logs/exports": {
+    "/v1/logs/exports": {
       "post": {
         "tags": [
           "logs"
@@ -2403,7 +2403,7 @@
         }
       }
     },
-    "/api/v1/logs/exports/{task_id}": {
+    "/v1/logs/exports/{task_id}": {
       "get": {
         "tags": [
           "logs"
@@ -2445,7 +2445,7 @@
         }
       }
     },
-    "/api/v1/logs/exports/{task_id}/download": {
+    "/v1/logs/exports/{task_id}/download": {
       "get": {
         "tags": [
           "logs"
@@ -2485,7 +2485,7 @@
         }
       }
     },
-    "/api/v1/logs/{log_id}": {
+    "/v1/logs/{log_id}": {
       "get": {
         "tags": [
           "logs"
@@ -2527,7 +2527,7 @@
         }
       }
     },
-    "/api/v1/stats/overview": {
+    "/v1/stats/overview": {
       "get": {
         "tags": [
           "stats"
@@ -2548,7 +2548,7 @@
         }
       }
     },
-    "/api/v1/stats/trends": {
+    "/v1/stats/trends": {
       "get": {
         "tags": [
           "stats"
@@ -2597,7 +2597,7 @@
         }
       }
     },
-    "/api/v1/search": {
+    "/v1/search": {
       "get": {
         "tags": [
           "stats"
@@ -2644,7 +2644,7 @@
         }
       }
     },
-    "/api/v1/notifications": {
+    "/v1/notifications": {
       "get": {
         "tags": [
           "notifications"
@@ -2669,7 +2669,7 @@
         }
       }
     },
-    "/api/v1/notifications/read-all": {
+    "/v1/notifications/read-all": {
       "post": {
         "tags": [
           "notifications"
@@ -2690,7 +2690,7 @@
         }
       }
     },
-    "/api/v1/settings": {
+    "/v1/settings": {
       "get": {
         "tags": [
           "settings"
@@ -2750,7 +2750,7 @@
         }
       }
     },
-    "/api/v1/settings/configs": {
+    "/v1/settings/configs": {
       "get": {
         "tags": [
           "settings"
@@ -2816,7 +2816,7 @@
         }
       }
     },
-    "/api/v1/settings/access-key": {
+    "/v1/settings/access-key": {
       "post": {
         "tags": [
           "settings"
@@ -2857,7 +2857,7 @@
         }
       }
     },
-    "/v1/agents/{agent_id}/chat": {
+    "/openai/v1/agents/{agent_id}/chat": {
       "post": {
         "tags": [
           "public"
@@ -2907,7 +2907,7 @@
         }
       }
     },
-    "/v1/models": {
+    "/openai/v1/models": {
       "get": {
         "tags": [
           "public"
@@ -2930,7 +2930,7 @@
         }
       }
     },
-    "/v1/chat/completions": {
+    "/openai/v1/chat/completions": {
       "post": {
         "tags": [
           "public"
@@ -2949,7 +2949,7 @@
         }
       }
     },
-    "/v1/embeddings": {
+    "/openai/v1/embeddings": {
       "post": {
         "tags": [
           "public"
@@ -2968,7 +2968,7 @@
         }
       }
     },
-    "/api/agui/v1/agents/{agent_id}/run": {
+    "/agui/v1/agents/{agent_id}/run": {
       "post": {
         "tags": [
           "agui"

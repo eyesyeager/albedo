@@ -86,7 +86,7 @@ async def sign_download_url(task_id: str, ttl_seconds: int) -> str:
     secret = get_settings().secret_key.encode()
     signature = hmac.new(secret, f"{task_id}:{expires}:{nonce}".encode(), hashlib.sha256).hexdigest()
     return (
-        f"/api/v1/logs/exports/{task_id}/download"
+        f"/v1/logs/exports/{task_id}/download"
         f"?expires={expires}&nonce={nonce}&signature={signature}"
     )
 

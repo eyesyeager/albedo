@@ -95,7 +95,7 @@ async def test_file_parser_blocks_escape_and_missing_files(uploads):
 
 
 async def test_http_request_blocks_private_network(uploads):
-    blocked = payload(await builtin.run_http_request("http://127.0.0.1:8000/api/v1/settings"))
+    blocked = payload(await builtin.run_http_request("http://127.0.0.1:8000/v1/settings"))
     assert blocked["status"] == "error"
     assert "SSRF" in blocked["summary"]
 

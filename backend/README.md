@@ -9,7 +9,7 @@ Python 3.12 + FastAPI + SQLAlchemy 2.0(async) + Alembic + MySQL 8.0 + Redis 的�
 ```bash
 cd backend
 uv sync                     # 生成 .venv 与 uv.lock（Python 3.12）
-cp .env.example .env        # 按 docs/运维信息.md 填写，凭据不得提交
+cp config.example.yml config.yml   # 按 docs/运维信息.md 填写，凭据不得提交
 python scripts/init_db.py   # 执行迁移 + 写入系统配置与内置工具目录 + 逐表校验
 uv run uvicorn app.main:app --reload --port 8000
 uv run arq app.worker.WorkerSettings   # 可选：后台任务与每日清理
@@ -19,7 +19,7 @@ uv run arq app.worker.WorkerSettings   # 可选：后台任务与每日清理
 
 ```bash
 cd frontend
-npm install && npm run dev  # http://localhost:5173，/api 与 /v1 已代理至 8000
+npm install && npm run dev  # http://localhost:5173，/v1、/openai 与 /agui 已代理至 8000
 ```
 
 前端始终连接后端，无模式开关；`ALBEDO_BACKEND_ORIGIN` 可覆盖代理目标。
@@ -29,8 +29,8 @@ npm install && npm run dev  # http://localhost:5173，/api 与 /v1 已代理至 
 - 迁移由 Alembic 管理：`uv run alembic revision --autogenerate -m "..."` / `uv run alembic upgrade head`。
 - `scripts/init_db.py` 串联 `alembic upgrade head` → 幂等写入系统必需数据 → 逐表计数校验。初始化**只**写入工作区设置行、`system_configs` 配置、管理面访问 Key 与内置工具目录，不预置任何业务数据。
 - `system_configs` 表存放业务可调参数：`platform`（名称、版本、域名、默认语言/时区/保留周期）、`options`（全部枚举与中文标签）、`defaults`（新建 Agent/模型/MCP/发布版本/Skill 的默认值）、`limits`（各类上限与配额）、`runtime`（运行时参数）、`builtinTools`（内置工具目录）。
-- `GET /api/v1/settings/configs` 读取配置，`PATCH /api/v1/settings/configs` 修改并即时生效；`GET /api/v1/workspace/bootstrap` 也会下发 `systemConfig`。进程内缓存由 `services/system_config.py` 同步，避免热路径反复查库。
-- 部署配置（数据库、Redis、`SECRET_KEY`、上游 Key、CORS、Cookie 等）只从被 `.gitignore` 忽略的 `backend/.env` 读取，不进数据库、不下发浏览器。非 dev 环境缺少真实上游凭据会在启动时拒绝。
+- `GET /v1/settings/configs` 读取配置，`PATCH /v1/settings/configs` 修改并即时生效；`GET /v1/workspace/bootstrap` 也会下发 `systemConfig`。进程内缓存由 `services/system_config.py` 同步，避免热路径反复查库。
+- 部署配置（数据库、Redis、`SECRET_KEY`、上游 Key、CORS、Cookie 等）从被 `.gitignore` 忽略的 `backend/config.yml` 读取（环境变量可覆盖同名项），不进数据库、不下发浏览器。非 dev 环境缺少真实上游凭据会在启动时拒绝。
 - 所有时间以 ISO 8601 UTC 字符串存储；访问 Key 明文不落库，只保存 Argon2id hash 与后缀，bootstrap 永不下发明文。
 
 ## 约定与边界
@@ -45,7 +45,7 @@ npm install && npm run dev  # http://localhost:5173，/api 与 /v1 已代理至 
 
 ## 真实数据管线
 
-- 调用趋势 `/api/v1/stats/trends` 由 `log_entries` 按自然日聚合，不再读取预置趋势表。
+- 调用趋势 `/v1/stats/trends` 由 `log_entries` 按自然日聚合，不再读取预置趋势表。
 - 内置工具调用次数、MCP 调用记录与成功率由 `services/tool_usage.py` 在每次工具执行后真实落库。
 - 通知由 `services/notify.py` 在失败审计、模型发布成功等真实事件写入。
 - 日志导出创建任务时即真实生成脱敏文件并写审计日志，签名有效期与过期天数来自系统配置；流式对外调用结束后回填日志终态。
@@ -55,16 +55,16 @@ npm install && npm run dev  # http://localhost:5173，/api 与 /v1 已代理至 
 
 | 路由 | 说明 |
 | --- | --- |
-| `POST /v1/agents/:id/chat` | Agent Token 鉴权，JSON 或 `stream=true` 的逐 token 增量 SSE（基于 `RuntimeEngine.run_stream`） |
-| `POST /api/agui/v1/agents/:id/run` | AGUI 事件流，事件缓存 TTL 来自系统配置，支持 `Last-Event-ID` 回放 |
-| `POST /v1/chat/completions` | 发布版本 Key 鉴权，OpenAI 兼容透传，参数/Header 合并与版本 QPM |
-| `POST /v1/embeddings` | Embedding 发布版本透传 |
-| `GET /v1/models` | 当前 Key 对应且启用的调用标识 |
+| `POST /openai/v1/agents/:id/chat` | Agent Token 鉴权，JSON 或 `stream=true` 的逐 token 增量 SSE（基于 `RuntimeEngine.run_stream`） |
+| `POST /agui/v1/agents/:id/run` | AGUI 事件流，事件缓存 TTL 来自系统配置，支持 `Last-Event-ID` 回放 |
+| `POST /openai/v1/chat/completions` | 发布版本 Key 鉴权，OpenAI 兼容透传，参数/Header 合并与版本 QPM |
+| `POST /openai/v1/embeddings` | Embedding 发布版本透传 |
+| `GET /openai/v1/models` | 当前 Key 对应且启用的调用标识 |
 
 - 鉴权：按 Key 后缀筛选 + Argon2 校验；跨 Agent 访问返回 `agent_access_denied`，未发布返回 `agent_not_published`。
 - 配额：固定窗口（窗口长度来自系统配置，Redis 降级进程内计数），超限 `rate_limit_exceeded`。
 - 上游凭证取 `upstream_model_key`（不是发布 Key）；禁止覆盖 `Host`/`Content-Length` 等 Header；上游错误统一映射。
-- 模型上游 Key、发布版本 Key、Agent Token 可通过 `GET /api/v1/{models,agents,publications}/:id/credential` 按需解密查看：需登录态、响应 `no-store`、写入系统操作日志；bootstrap 与常规资源读接口仍只返回 `credentialSuffix`。
+- 模型上游 Key、发布版本 Key、Agent Token 可通过 `GET /v1/{models,agents,publications}/:id/credential` 按需解密查看：需登录态、响应 `no-store`、写入系统操作日志；bootstrap 与常规资源读接口仍只返回 `credentialSuffix`。
 
 ## 安全加固
 

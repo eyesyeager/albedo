@@ -18,7 +18,8 @@ export default defineConfig(({ mode }) => {
       port: 5173,
       allowedHosts: true,
       proxy: {
-        '/api': { target: backendOrigin, changeOrigin: true },
+        '/openai': { target: backendOrigin, changeOrigin: true },
+        '/agui': { target: backendOrigin, changeOrigin: true },
         '/v1': { target: backendOrigin, changeOrigin: true },
       },
     },

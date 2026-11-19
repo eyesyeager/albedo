@@ -16,12 +16,12 @@ def test_openapi_snapshot_is_current() -> None:
 
 def test_management_and_public_plane_contract() -> None:
     spec = app.openapi()
-    assert "/api/v1/meta" in spec["paths"]
-    assert "/api/v1/workspace/bootstrap" in spec["paths"]
-    assert "/v1/agents/{agent_id}/chat" in spec["paths"]
-    assert "/v1/chat/completions" in spec["paths"]
-    assert "/api/agui/v1/agents/{agent_id}/run" in spec["paths"]
-    assert not any(path.startswith("/api/v1/v1/") for path in spec["paths"]), "管理面与对外面前缀必须隔离"
+    assert "/v1/meta" in spec["paths"]
+    assert "/v1/workspace/bootstrap" in spec["paths"]
+    assert "/openai/v1/agents/{agent_id}/chat" in spec["paths"]
+    assert "/openai/v1/chat/completions" in spec["paths"]
+    assert "/agui/v1/agents/{agent_id}/run" in spec["paths"]
+    assert not any(path.startswith("/v1/openai/v1/") for path in spec["paths"]), "管理面与对外面前缀必须隔离"
 
 
 def test_schemathesis_can_load_contract() -> None:

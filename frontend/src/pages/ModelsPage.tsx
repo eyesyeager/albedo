@@ -47,7 +47,7 @@ export function ModelsPage() {
   const deleteModel = deleteId ? data.models.find((model) => model.id === deleteId) : undefined
   const deleteAffected = deleteModel ? affectedAgents(data, 'model', deleteModel.id) : []
   const deleteVersions = deleteModel ? publicationsOf(data, deleteModel.id) : []
-  const baseUrl = `${data.settings.domain.replace(/\/$/, '')}/v1`
+  const baseUrl = `${data.settings.domain.replace(/\/$/, '')}/openai/v1`
 
   const applyToggle = (id: string, enabled: boolean) => {
     setBusy(true)

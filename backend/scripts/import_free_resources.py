@@ -187,13 +187,13 @@ async def login(client: httpx.AsyncClient) -> None:
     access_key = env_value("DEMO_ACCESS_KEY")
     if not access_key:
         raise SystemExit("backend/.env 缺少 DEMO_ACCESS_KEY，无法登录管理面")
-    response = await client.post("/api/v1/auth/login", json={"key": access_key})
+    response = await client.post("/v1/auth/login", json={"key": access_key})
     if response.status_code != 200:
         raise SystemExit(f"管理面登录失败：HTTP {response.status_code} {response.text[:200]}")
 
 
 async def import_mcps(client: httpx.AsyncClient) -> tuple[int, int, int]:
-    existing = {item["name"] for item in (await client.get("/api/v1/mcps")).json()}
+    existing = {item["name"] for item in (await client.get("/v1/mcps")).json()}
     added = skipped = failed = 0
     for draft in remote_mcps() + stdio_mcps():
         payload = {**draft, "headers": "{}", "timeoutSeconds": 60, "tested": True}
@@ -202,10 +202,10 @@ async def import_mcps(client: httpx.AsyncClient) -> tuple[int, int, int]:
             skipped += 1
             continue
         try:
-            tested = await client.post("/api/v1/mcps/test", json=payload)
+            tested = await client.post("/v1/mcps/test", json=payload)
             tested.raise_for_status()
             tools = tested.json().get("toolCount", 0)
-            created = await client.post("/api/v1/mcps", json=payload)
+            created = await client.post("/v1/mcps", json=payload)
             created.raise_for_status()
             print(f"✓ 接入 MCP：{draft['name']}（{tools} 个工具）")
             added += 1
@@ -221,7 +221,7 @@ async def import_skills(client: httpx.AsyncClient, refresh: bool) -> tuple[int, 
     if refresh and SKILLS_ZIP.exists():
         SKILLS_ZIP.unlink()
     zip_bytes = download_skills_zip().read_bytes()
-    existing = {item["name"] for item in (await client.get("/api/v1/skills")).json()}
+    existing = {item["name"] for item in (await client.get("/v1/skills")).json()}
     added = skipped = failed = 0
     for display_name, folder in SKILLS.items():
         if display_name in existing:
@@ -234,7 +234,7 @@ async def import_skills(client: httpx.AsyncClient, refresh: bool) -> tuple[int, 
             continue
         try:
             response = await client.post(
-                "/api/v1/skills",
+                "/v1/skills",
                 data={
                     "name": payload["name"],
                     "instructions": payload["instructions"],

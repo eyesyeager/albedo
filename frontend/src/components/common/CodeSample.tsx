@@ -4,8 +4,8 @@ export type SampleLanguage = 'curl' | 'python' | 'javascript'
 export function endpointOf(protocol: Protocol, agentId: string, domain: string): string {
   const base = domain.replace(/\/$/, '')
   return protocol === 'api'
-    ? `${base}/v1/agents/${agentId}/chat`
-    : `${base}/api/agui/v1/agents/${agentId}/run`
+    ? `${base}/openai/v1/agents/${agentId}/chat`
+    : `${base}/agui/v1/agents/${agentId}/run`
 }
 
 export function methodOf(protocol: Protocol, domain: string): string {

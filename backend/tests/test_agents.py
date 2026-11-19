@@ -10,14 +10,14 @@ DEMO_KEY = get_settings().demo_access_key
 
 
 async def login(client: AsyncClient) -> None:
-    response = await client.post("/api/v1/auth/login", json={"key": DEMO_KEY})
+    response = await client.post("/v1/auth/login", json={"key": DEMO_KEY})
     assert response.status_code == 200, response.text
 
 
 @pytest.mark.asyncio
 async def test_agent_crud_and_optimistic_lock(client: AsyncClient) -> None:
     await login(client)
-    created = await client.post("/api/v1/agents", json={
+    created = await client.post("/v1/agents", json={
         "name": "集成测试智能体", "description": "由 pytest 创建",
         "defaultModelId": "mdl-gpt", "systemPrompt": "你是测试助手，当前时间 {{currentTime}}。",
     })
@@ -27,49 +27,49 @@ async def test_agent_crud_and_optimistic_lock(client: AsyncClient) -> None:
     assert agent["mounts"]["modelIds"] == ["mdl-gpt"]
     assert created.json()["version"] == 1
 
-    updated = await client.patch(f"/api/v1/agents/{agent['id']}", json={
+    updated = await client.patch(f"/v1/agents/{agent['id']}", json={
         "name": "集成测试智能体（已改）", "variables": ["topic"], "expectedVersion": 1,
     })
     assert updated.status_code == 200, updated.text
     assert updated.json()["version"] == 2
     assert updated.json()["entity"]["name"].endswith("（已改）")
 
-    stale = await client.patch(f"/api/v1/agents/{agent['id']}", json={"name": "过期版本", "expectedVersion": 1})
+    stale = await client.patch(f"/v1/agents/{agent['id']}", json={"name": "过期版本", "expectedVersion": 1})
     assert stale.status_code == 409
     assert stale.json()["error"]["code"] == "stale_version"
 
-    blank_prompt = await client.patch(f"/api/v1/agents/{agent['id']}", json={"systemPrompt": "   "})
+    blank_prompt = await client.patch(f"/v1/agents/{agent['id']}", json={"systemPrompt": "   "})
     assert blank_prompt.status_code == 400
 
-    removed = await client.delete(f"/api/v1/agents/{agent['id']}")
+    removed = await client.delete(f"/v1/agents/{agent['id']}")
     assert removed.status_code == 200
-    listed = await client.get("/api/v1/agents")
+    listed = await client.get("/v1/agents")
     assert all(item["id"] != agent["id"] for item in listed.json())
 
 
 @pytest.mark.asyncio
 async def test_publish_check_protocol_and_credential(client: AsyncClient) -> None:
     await login(client)
-    check = await client.post("/api/v1/agents/agt-research/publish-check")
+    check = await client.post("/v1/agents/agt-research/publish-check")
     assert check.json()["passed"] is True, check.json()
 
-    closed = await client.patch("/api/v1/agents/agt-research/protocols", json={"protocol": "api", "enabled": False})
+    closed = await client.patch("/v1/agents/agt-research/protocols", json={"protocol": "api", "enabled": False})
     assert closed.json()["entity"]["apiEnabled"] is False
-    opened = await client.patch("/api/v1/agents/agt-research/protocols", json={"protocol": "api", "enabled": True})
+    opened = await client.patch("/v1/agents/agt-research/protocols", json={"protocol": "api", "enabled": True})
     assert opened.json()["entity"]["apiEnabled"] is True
 
-    reset = await client.post("/api/v1/agents/agt-research/credential/reset")
+    reset = await client.post("/v1/agents/agt-research/credential/reset")
     assert reset.json()["fullKey"].startswith("alb_agt_")
     assert reset.json()["credentialSuffix"] == reset.json()["fullKey"][-4:]
-    revealed = await client.get("/api/v1/agents/agt-research/credential")
+    revealed = await client.get("/v1/agents/agt-research/credential")
     assert revealed.status_code == 200, revealed.text
     assert revealed.json()["fullKey"] == reset.json()["fullKey"]
     assert revealed.json()["credentialSuffix"] == reset.json()["credentialSuffix"]
-    bootstrap = await client.get("/api/v1/workspace/bootstrap")
+    bootstrap = await client.get("/v1/workspace/bootstrap")
     assert "accessKey" not in bootstrap.json()["settings"]
     assert revealed.json()["fullKey"] not in json.dumps(bootstrap.json(), ensure_ascii=False)
 
-    history = await client.get("/api/v1/agents/agt-research/history")
+    history = await client.get("/v1/agents/agt-research/history")
     assert history.json()["total"] >= 1
     assert "standard_api" in history.json()["sources"]
 
@@ -77,11 +77,11 @@ async def test_publish_check_protocol_and_credential(client: AsyncClient) -> Non
 @pytest.mark.asyncio
 async def test_test_run_persists_messages_and_logs(client: AsyncClient) -> None:
     await login(client)
-    before = await client.get("/api/v1/workspace/bootstrap")
+    before = await client.get("/v1/workspace/bootstrap")
     agent = next(item for item in before.json()["agents"] if item["id"] == "agt-research")
     count_before = agent["sessionCount"]
 
-    result = await client.post("/api/v1/agents/agt-research/test-runs", json={
+    result = await client.post("/v1/agents/agt-research/test-runs", json={
         "content": "请分析订单下降的原因", "testModelId": "mdl-gpt", "threadId": "thd_pytest_run",
     })
     assert result.status_code == 200, result.text
@@ -93,28 +93,28 @@ async def test_test_run_persists_messages_and_logs(client: AsyncClient) -> None:
     assert len(body["logs"]) >= 2
     assert body["sessionCount"] == count_before + 1
 
-    after = await client.get("/api/v1/workspace/bootstrap")
+    after = await client.get("/v1/workspace/bootstrap")
     messages = after.json()["chatSessions"]["agt-research"]
     assert any(message["id"] == body["messages"][0]["id"] for message in messages)
     assert any(log["logId"] == body["logs"][0]["logId"] for log in after.json()["logs"])
 
-    cleared = await client.delete("/api/v1/agents/agt-research/test-session")
+    cleared = await client.delete("/v1/agents/agt-research/test-session")
     assert cleared.status_code == 200
     # 默认 thread 与调用方自定义 thread 都要被清理，否则会出现「消息已清空但仍记得」。
     assert cleared.json()["clearedThreads"] >= 2
-    empty = await client.get("/api/v1/workspace/bootstrap")
+    empty = await client.get("/v1/workspace/bootstrap")
     assert empty.json()["chatSessions"].get("agt-research", []) == []
 
 
 @pytest.mark.asyncio
 async def test_test_run_stream_emits_sse_and_persists(client: AsyncClient) -> None:
     await login(client)
-    before = await client.get("/api/v1/workspace/bootstrap")
+    before = await client.get("/v1/workspace/bootstrap")
     agent = next(item for item in before.json()["agents"] if item["id"] == "agt-research")
     count_before = agent["sessionCount"]
 
     async with client.stream(
-        "POST", "/api/v1/agents/agt-research/test-runs",
+        "POST", "/v1/agents/agt-research/test-runs",
         headers={"Accept": "text/event-stream"},
         json={"content": "请用流式方式回答", "testModelId": "mdl-gpt", "threadId": "thd_pytest_stream"},
     ) as response:
@@ -154,7 +154,7 @@ async def test_test_run_stream_emits_sse_and_persists(client: AsyncClient) -> No
     streamed_text = "".join(data["delta"] for name, data in events if name == "message.delta")
     assert streamed_text == finished["messages"][-1]["content"]
 
-    after = await client.get("/api/v1/workspace/bootstrap")
+    after = await client.get("/v1/workspace/bootstrap")
     assert any(
         message["id"] == finished["messages"][-1]["id"]
         for message in after.json()["chatSessions"]["agt-research"]
@@ -182,11 +182,11 @@ async def test_failed_run_writes_audit_log(client: AsyncClient, monkeypatch: pyt
             raise error
 
     monkeypatch.setattr(agents_api, "get_runtime_engine", lambda: FailingEngine())
-    response = await client.post("/api/v1/agents/agt-code/test-runs", json={"content": "触发失败", "testModelId": "mdl-gpt"})
+    response = await client.post("/v1/agents/agt-code/test-runs", json={"content": "触发失败", "testModelId": "mdl-gpt"})
     assert response.status_code == 500
     assert response.json()["error"]["code"] == "agent_run_failed"
 
-    logs = await client.get("/api/v1/logs", params={"keyword": "失败运行审计测试", "range": "1y"})
+    logs = await client.get("/v1/logs", params={"keyword": "失败运行审计测试", "range": "1y"})
     assert logs.status_code == 200
     items = logs.json()["items"]
     assert items, "失败运行必须写入审计日志"
@@ -203,37 +203,37 @@ async def test_publication_versions_and_key_rotation(client: AsyncClient) -> Non
         "apiKey": "alb_sk_live_test_1234567890", "headers": "{}",
         "temperature": 0.8, "maxOutputTokens": 2048, "qpm": 30,
     }
-    created = await client.post("/api/v1/models/mdl-gpt/publications", json=draft)
+    created = await client.post("/v1/models/mdl-gpt/publications", json=draft)
     assert created.status_code == 201, created.text
     publication = created.json()["publication"]
     assert publication["id"].startswith("pub-")
     assert created.json()["fullKey"] == draft["apiKey"]
-    revealed = await client.get(f"/api/v1/publications/{publication['id']}/credential")
+    revealed = await client.get(f"/v1/publications/{publication['id']}/credential")
     assert revealed.status_code == 200, revealed.text
     assert revealed.json()["fullKey"] == draft["apiKey"]
     assert revealed.json()["credentialSuffix"] == "7890"
 
-    duplicate = await client.post("/api/v1/models/mdl-gpt/publications", json=draft)
+    duplicate = await client.post("/v1/models/mdl-gpt/publications", json=draft)
     assert duplicate.status_code == 409
     assert duplicate.json()["error"]["code"] == "duplicate_identifier"
 
-    toggled = await client.patch(f"/api/v1/publications/{publication['id']}", json={"enabled": False})
+    toggled = await client.patch(f"/v1/publications/{publication['id']}", json={"enabled": False})
     assert toggled.json()["entity"]["enabled"] is False
 
-    rotated = await client.post(f"/api/v1/publications/{publication['id']}/key/rotate", json={"apiKey": "alb_sk_rotated_1234567890"})
+    rotated = await client.post(f"/v1/publications/{publication['id']}/key/rotate", json={"apiKey": "alb_sk_rotated_1234567890"})
     assert rotated.status_code == 200
     assert rotated.json()["fullKey"].endswith("7890")
     assert rotated.json()["entity"]["credentialSuffix"] == "7890"
-    revealed_after_rotate = await client.get(f"/api/v1/publications/{publication['id']}/credential")
+    revealed_after_rotate = await client.get(f"/v1/publications/{publication['id']}/credential")
     assert revealed_after_rotate.json()["fullKey"] == "alb_sk_rotated_1234567890"
 
-    weak = await client.post(f"/api/v1/publications/{publication['id']}/key/rotate", json={"apiKey": "short"})
+    weak = await client.post(f"/v1/publications/{publication['id']}/key/rotate", json={"apiKey": "short"})
     assert weak.status_code == 400
 
-    removed = await client.delete(f"/api/v1/publications/{publication['id']}")
+    removed = await client.delete(f"/v1/publications/{publication['id']}")
     assert removed.status_code == 200
-    remaining = await client.get("/api/v1/models/mdl-gpt/publications")
+    remaining = await client.get("/v1/models/mdl-gpt/publications")
     assert all(item["id"] != publication["id"] for item in remaining.json())
 
-    missing = await client.delete(f"/api/v1/publications/{publication['id']}")
+    missing = await client.delete(f"/v1/publications/{publication['id']}")
     assert missing.status_code == 404

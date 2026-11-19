@@ -6,7 +6,7 @@ from pathlib import Path
 
 from cryptography.fernet import Fernet
 from pydantic import model_validator
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings import BaseSettings, SettingsConfigDict, YamlConfigSettingsSource
 
 BACKEND_ROOT = Path(__file__).resolve().parents[2]
 
@@ -52,14 +52,36 @@ def _persistent_dev_key() -> str:
 
 
 class Settings(BaseSettings):
+    # 配置来源优先级：环境变量 > config.yml > 代码默认值。
+    # config.yml 位于 backend/config.yml，会被 Dockerfile 一并 COPY 进镜像，运行时零配置。
+    # 敏感项（secret_key / 各类口令 / 上游 Key）建议在 yml 中留空，改由环境变量在运行时覆盖，
+    # 避免明文凭据固化进镜像层。
     model_config = SettingsConfigDict(
-        env_file=str(BACKEND_ROOT / ".env"),
-        env_file_encoding="utf-8",
+        yaml_file=str(BACKEND_ROOT / "config.yml"),
+        yaml_file_encoding="utf-8",
         extra="ignore",
         case_sensitive=False,
     )
 
-    # 连接串与凭据一律由环境变量 / .env 注入，源码内只保留不可用的占位符。
+    @classmethod
+    def settings_customise_sources(
+        cls,
+        settings_cls,
+        init_settings,
+        env_settings,
+        dotenv_settings,
+        file_secret_settings,
+    ):
+        # 优先级（由高到低）：构造参数 > 环境变量 > config.yml > secrets 目录 > 字段默认值。
+        # 刻意不包含 dotenv_settings，避免残留 .env 文件干扰；.env 已被 config.yml 取代。
+        return (
+            init_settings,
+            env_settings,
+            YamlConfigSettingsSource(settings_cls),
+            file_secret_settings,
+        )
+
+    # 连接串与凭据一律由环境变量 / config.yml 注入，源码内只保留不可用的占位符。
     database_url: str = PLACEHOLDER_DSN
     redis_url: str = "redis://127.0.0.1:6379/0"
     secret_key: str = ""

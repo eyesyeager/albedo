@@ -10,12 +10,12 @@ DEMO_KEY = get_settings().demo_access_key
 
 
 async def admin_login(client: AsyncClient) -> None:
-    response = await client.post("/api/v1/auth/login", json={"key": DEMO_KEY})
+    response = await client.post("/v1/auth/login", json={"key": DEMO_KEY})
     assert response.status_code == 200
 
 
 async def reset_agent_token(client: AsyncClient, agent_id: str = "agt-research") -> str:
-    response = await client.post(f"/api/v1/agents/{agent_id}/credential/reset")
+    response = await client.post(f"/v1/agents/{agent_id}/credential/reset")
     assert response.status_code == 200, response.text
     return response.json()["fullKey"]
 
@@ -34,7 +34,7 @@ def sse_data(body: str) -> list[dict]:
 
 @pytest.mark.asyncio
 async def test_public_requires_bearer(client: AsyncClient) -> None:
-    response = await client.post("/v1/agents/agt-research/chat", json={"messages": [{"role": "user", "content": "hi"}]})
+    response = await client.post("/openai/v1/agents/agt-research/chat", json={"messages": [{"role": "user", "content": "hi"}]})
     assert response.status_code == 401
     assert response.json()["error"]["code"] == "invalid_api_key"
 
@@ -46,7 +46,7 @@ async def test_public_agent_chat_and_access_control(client: AsyncClient) -> None
     variables = {"researchDepth": "标准", "outputLanguage": "中文"}
 
     response = await client.post(
-        "/v1/agents/agt-research/chat",
+        "/openai/v1/agents/agt-research/chat",
         headers=auth(token),
         json={"messages": [{"role": "user", "content": "请用一句话说明测试目的"}], "variables": variables, "threadId": "thd_public_test"},
     )
@@ -60,7 +60,7 @@ async def test_public_agent_chat_and_access_control(client: AsyncClient) -> None
     assert body["metadata"]["durationMs"] >= 0
 
     forbidden = await client.post(
-        "/v1/agents/agt-code/chat",
+        "/openai/v1/agents/agt-code/chat",
         headers=auth(token),
         json={"messages": [{"role": "user", "content": "hi"}]},
     )
@@ -68,14 +68,14 @@ async def test_public_agent_chat_and_access_control(client: AsyncClient) -> None
     assert forbidden.json()["error"]["code"] == "agent_access_denied"
 
     invalid = await client.post(
-        "/v1/agents/agt-research/chat",
+        "/openai/v1/agents/agt-research/chat",
         headers=auth("alb_agt_invalid_token_0000"),
         json={"messages": [{"role": "user", "content": "hi"}]},
     )
     assert invalid.status_code == 401
 
     missing_variable = await client.post(
-        "/v1/agents/agt-research/chat",
+        "/openai/v1/agents/agt-research/chat",
         headers=auth(token),
         json={"messages": [{"role": "user", "content": "缺少变量"}]},
     )
@@ -89,7 +89,7 @@ async def test_public_agent_chat_stream(client: AsyncClient) -> None:
     token = await reset_agent_token(client)
     async with client.stream(
         "POST",
-        "/v1/agents/agt-research/chat",
+        "/openai/v1/agents/agt-research/chat",
         headers=auth(token),
         json={
             "messages": [{"role": "user", "content": "流式输出测试"}],
@@ -117,7 +117,7 @@ async def test_agui_event_order_and_resume(client: AsyncClient) -> None:
         "messages": [{"id": "msg-1", "role": "user", "content": "AGUI 测试"}],
         "context": {"variables": {"researchDepth": "标准", "outputLanguage": "中文"}},
     }
-    async with client.stream("POST", "/api/agui/v1/agents/agt-research/run", headers=auth(token), json=payload) as response:
+    async with client.stream("POST", "/agui/v1/agents/agt-research/run", headers=auth(token), json=payload) as response:
         assert response.status_code == 200, await response.aread()
         assert response.headers["x-agui-version"] == "1"
         body = "".join([chunk async for chunk in response.aiter_text()])
@@ -134,7 +134,7 @@ async def test_agui_event_order_and_resume(client: AsyncClient) -> None:
     assert sequences == list(range(1, len(sequences) + 1))
 
     async with client.stream(
-        "POST", "/api/agui/v1/agents/agt-research/run",
+        "POST", "/agui/v1/agents/agt-research/run",
         headers={**auth(token), "Last-Event-ID": "2"}, json=payload,
     ) as resumed:
         resumed_body = "".join([chunk async for chunk in resumed.aiter_text()])
@@ -143,7 +143,7 @@ async def test_agui_event_order_and_resume(client: AsyncClient) -> None:
 
     code_token = await reset_agent_token(client, "agt-code")
     disabled = await client.post(
-        "/api/agui/v1/agents/agt-code/run",
+        "/agui/v1/agents/agt-code/run",
         headers=auth(code_token),
         json={"threadId": "thd_agui_code", "runId": "run_agui_code", "messages": [{"id": "m", "role": "user", "content": "hi"}]},
     )
@@ -155,22 +155,22 @@ async def test_agui_event_order_and_resume(client: AsyncClient) -> None:
 async def test_publication_key_models_and_errors(client: AsyncClient) -> None:
     await admin_login(client)
     rotated = await client.post(
-        "/api/v1/publications/pub-gpt-stable/key/rotate",
+        "/v1/publications/pub-gpt-stable/key/rotate",
         json={"apiKey": "alb_sk_live_pytest_1234567890"},
     )
     assert rotated.status_code == 200
     token = rotated.json()["fullKey"]
 
-    models = await client.get("/v1/models", headers=auth(token))
+    models = await client.get("/openai/v1/models", headers=auth(token))
     assert models.status_code == 200, models.text
     assert models.json()["data"][0]["id"] == "albedo-gpt-4.1"
 
-    invalid = await client.get("/v1/models", headers=auth("alb_sk_invalid_key_0000"))
+    invalid = await client.get("/openai/v1/models", headers=auth("alb_sk_invalid_key_0000"))
     assert invalid.status_code == 401
 
     # 标识不存在 → 404；存在但 Key 无权 → 403，两者语义必须区分。
     not_found = await client.post(
-        "/v1/chat/completions",
+        "/openai/v1/chat/completions",
         headers=auth(token),
         json={"model": "another-model", "messages": [{"role": "user", "content": "hi"}]},
     )
@@ -178,7 +178,7 @@ async def test_publication_key_models_and_errors(client: AsyncClient) -> None:
     assert not_found.json()["error"]["code"] == "model_not_found"
 
     not_allowed = await client.post(
-        "/v1/chat/completions",
+        "/openai/v1/chat/completions",
         headers=auth(token),
         json={"model": "albedo-gpt-4.1-creative", "messages": [{"role": "user", "content": "hi"}]},
     )
@@ -187,7 +187,7 @@ async def test_publication_key_models_and_errors(client: AsyncClient) -> None:
 
     # 上游凭证缺失属于网关侧不可用，返回 502 而不是「版本停用」409。
     no_credential = await client.post(
-        "/v1/chat/completions",
+        "/openai/v1/chat/completions",
         headers=auth(token),
         json={"model": "albedo-gpt-4.1", "messages": [{"role": "user", "content": "hi"}]},
     )
@@ -195,7 +195,7 @@ async def test_publication_key_models_and_errors(client: AsyncClient) -> None:
     assert no_credential.json()["error"]["code"] == "upstream_not_configured"
 
     wrong_type = await client.post(
-        "/v1/embeddings",
+        "/openai/v1/embeddings",
         headers=auth(token),
         json={"model": "albedo-gpt-4.1", "input": "hello"},
     )
@@ -207,7 +207,7 @@ async def test_public_agent_not_published(client: AsyncClient) -> None:
     await admin_login(client)
     token = await reset_agent_token(client, "agt-data")
     response = await client.post(
-        "/v1/agents/agt-data/chat",
+        "/openai/v1/agents/agt-data/chat",
         headers=auth(token),
         json={"messages": [{"role": "user", "content": "hi"}]},
     )
