@@ -6,12 +6,14 @@ from app.schemas.domain import DomainModel, LogEntry
 class LoginResponse(DomainModel):
     authenticated: bool
     workspaceName: str = ""
+    csrfToken: str = ""
     log: LogEntry | None = None
 
 
 class SessionResponse(DomainModel):
     authenticated: bool
     workspaceName: str = ""
+    csrfToken: str = ""
 
 
 class LogoutResponse(DomainModel):

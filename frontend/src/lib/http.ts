@@ -5,11 +5,12 @@ import { defaultSystemConfig, emptyWorkspace } from './defaults'
 import { useAuth } from '../store/auth'
 import { useWorkspace } from '../store/workspace'
 
-const BASE = '/v1'
+const BASE = import.meta.env.VITE_API_BASE || '/v1'
 
-function readCookie(name: string): string {
-  const match = document.cookie.match(new RegExp(`(?:^|;\\s*)${name}=([^;]*)`))
-  return match ? decodeURIComponent(match[1]) : ''
+let csrfToken = ''
+
+export function setCsrfToken(token: string): void {
+  csrfToken = token
 }
 
 export interface HttpOptions extends Omit<RequestInit, 'headers'> {
@@ -18,11 +19,9 @@ export interface HttpOptions extends Omit<RequestInit, 'headers'> {
 }
 
 function buildHeaders(headers: Record<string, string> | undefined, body: BodyInit | null | undefined): Record<string, string> {
-  // 生产使用 __Host- 前缀的 CSRF Cookie；dev 仍是旧名称。
-  const csrf = readCookie('__Host-albedo_csrf') || readCookie('albedo_csrf')
   return {
     'X-Request-Id': newRequestId(),
-    ...(csrf ? { 'X-CSRF-Token': csrf } : {}),
+    ...(csrfToken ? { 'X-CSRF-Token': csrfToken } : {}),
     ...(body && !(body instanceof FormData) ? { 'Content-Type': 'application/json' } : {}),
     ...headers,
   }
@@ -30,6 +29,7 @@ function buildHeaders(headers: Record<string, string> | undefined, body: BodyIni
 
 /** 会话失效或主动登出时同步清空全局工作区，且不依赖网络请求是否成功。 */
 export function clearSessionState(): void {
+  csrfToken = ''
   useWorkspace.getState().replaceAll(emptyWorkspace())
   useAuth.getState().logout()
 }
@@ -160,8 +160,10 @@ export async function fetchBootstrap(): Promise<WorkspaceData> {
   return hydrate(await http<WorkspaceData>('/workspace/bootstrap'))
 }
 
-export async function fetchSession(): Promise<{ authenticated: boolean; workspaceName?: string }> {
-  return await http<{ authenticated: boolean; workspaceName?: string }>('/auth/session')
+export async function fetchSession(): Promise<{ authenticated: boolean; workspaceName?: string; csrfToken?: string }> {
+  const session = await http<{ authenticated: boolean; workspaceName?: string; csrfToken?: string }>('/auth/session')
+  if (session.csrfToken) setCsrfToken(session.csrfToken)
+  return session
 }
 
 // 全量快照只允许最新一次生效，避免较慢返回的旧快照覆盖期间已完成的局部写操作。

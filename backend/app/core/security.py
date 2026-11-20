@@ -38,6 +38,21 @@ def constant_time_equal(left: str, right: str) -> bool:
     return hmac.compare_digest(hashlib.sha256(left.encode()).digest(), hashlib.sha256(right.encode()).digest())
 
 
+_CSRF_CONTEXT = b"albedo:csrf:"
+
+
+def csrf_token_for(session_id: str) -> str:
+    """无状态 CSRF 令牌：HMAC(SECRET_KEY, session_id)，跨域直连时随登录响应下发。"""
+    secret = get_settings().secret_key.encode()
+    return hmac.new(secret, _CSRF_CONTEXT + session_id.encode(), hashlib.sha256).hexdigest()
+
+
+def verify_csrf_token(session_id: str, provided: str) -> bool:
+    if not provided:
+        return False
+    return constant_time_equal(csrf_token_for(session_id), provided)
+
+
 def suffix_of(value: str) -> str:
     return value[-4:] if len(value) >= 4 else value
 

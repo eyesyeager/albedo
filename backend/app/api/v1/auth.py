@@ -1,5 +1,3 @@
-import secrets
-
 from fastapi import APIRouter, Depends, Request, Response
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -8,7 +6,7 @@ from app.api.deps import optional_session
 from app.core.config import get_settings
 from app.core.errors import ApiException
 from app.core.redis_client import try_delete, try_get_count, try_increment
-from app.core.security import constant_time_equal, hash_secret, iso_after, new_session_id, now_iso, verify_secret
+from app.core.security import csrf_token_for, hash_secret, iso_after, new_session_id, now_iso, verify_csrf_token, verify_secret
 from app.db import models as m
 from app.db.session import get_db
 from app.schemas.requests import LoginRequest
@@ -67,20 +65,10 @@ async def login(payload: LoginRequest, request: Request, response: Response, db:
     log = await audit(db, "登录成功", "管理界面访问 Key 校验通过")
     await db.commit()
 
-    csrf_token = secrets.token_urlsafe(24)
     response.set_cookie(
         key=settings.session_cookie_name,
         value=session_id,
         httponly=True,
-        secure=settings.cookie_secure,
-        samesite=settings.session_samesite,
-        max_age=settings.session_absolute_hours * 3600,
-        path="/",
-    )
-    response.set_cookie(
-        key=settings.csrf_cookie_name,
-        value=csrf_token,
-        httponly=False,
         secure=settings.cookie_secure,
         samesite=settings.session_samesite,
         max_age=settings.session_absolute_hours * 3600,
@@ -91,19 +79,19 @@ async def login(payload: LoginRequest, request: Request, response: Response, db:
         "authenticated": True,
         "workspaceName": workspace.workspace_name if workspace else "",
         "log": log,
+        "csrfToken": csrf_token_for(session_id),
     }
 
 
 @router.post("/auth/logout", response_model=LogoutResponse, summary="退出登录")
 async def logout(request: Request, response: Response, db: AsyncSession = Depends(get_db)) -> dict:
     settings = get_settings()
-    # 登出属于状态变更，必须校验 CSRF，否则可被跨站强制登出。
-    if settings.csrf_enabled:
-        expected = request.cookies.get(settings.csrf_cookie_name, "")
-        provided = request.headers.get("X-CSRF-Token", "")
-        if not expected or not constant_time_equal(expected, provided):
-            raise ApiException("invalid_api_key", "CSRF 校验失败，请刷新页面后重试", 403)
     session = await optional_session(request, db)
+    # 登出属于状态变更，必须校验 CSRF，否则可被跨站强制登出。
+    if settings.csrf_enabled and session is not None and not verify_csrf_token(
+        session.id, request.headers.get("X-CSRF-Token", "")
+    ):
+        raise ApiException("invalid_api_key", "CSRF 校验失败，请刷新页面后重试", 403)
     log = None
     if session is not None:
         session.revoked_at = now_iso()
@@ -111,7 +99,6 @@ async def logout(request: Request, response: Response, db: AsyncSession = Depend
         await db.commit()
     cookie_options = {"path": "/", "secure": settings.cookie_secure, "samesite": settings.session_samesite}
     response.delete_cookie(settings.session_cookie_name, **cookie_options)
-    response.delete_cookie(settings.csrf_cookie_name, **cookie_options)
     return {"ok": True, "log": log}
 
 
@@ -121,4 +108,8 @@ async def session_info(request: Request, db: AsyncSession = Depends(get_db)) -> 
     if session is None:
         return {"authenticated": False}
     workspace = await db.get(m.WorkspaceSetting, 1)
-    return {"authenticated": True, "workspaceName": workspace.workspace_name if workspace else ""}
+    return {
+        "authenticated": True,
+        "workspaceName": workspace.workspace_name if workspace else "",
+        "csrfToken": csrf_token_for(session.id),
+    }

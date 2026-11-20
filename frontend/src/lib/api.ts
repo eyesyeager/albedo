@@ -31,7 +31,7 @@ import type {
 import { useAuth } from '../store/auth'
 import { useWorkspace } from '../store/workspace'
 import { ApiError } from './errors'
-import { http, httpBlob, hydrate, jsonBody, openEventStream, replaceFromServer, fetchSession, fetchBootstrap, clearSessionState } from './http'
+import { http, httpBlob, hydrate, jsonBody, openEventStream, replaceFromServer, fetchSession, fetchBootstrap, clearSessionState, setCsrfToken } from './http'
 import { readSse } from './sse'
 
 interface WriteResponse<T> {
@@ -97,7 +97,8 @@ const wait = (ms: number): Promise<void> => new Promise((resolve) => window.setT
 export const api = {
   auth: {
     async login(key: string): Promise<void> {
-      const response = await post<{ authenticated: boolean; log?: LogEntry }>('/auth/login', { key })
+      const response = await post<{ authenticated: boolean; csrfToken?: string; log?: LogEntry }>('/auth/login', { key })
+      if (response.csrfToken) setCsrfToken(response.csrfToken)
       // 登录做成事务：快照加载成功后才置登录态，失败时整体保持未登录。
       await replaceFromServer()
       useAuth.getState().setAuthenticated(true)

@@ -161,10 +161,6 @@ class Settings(BaseSettings):
         return "__Host-albedo_session" if self.cookie_secure else "albedo_session"
 
     @property
-    def csrf_cookie_name(self) -> str:
-        return "__Host-albedo_csrf" if self.cookie_secure else "albedo_csrf"
-
-    @property
     def session_samesite(self) -> str:
         return "strict" if self.cookie_secure else "lax"
 

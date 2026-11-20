@@ -268,11 +268,9 @@ def test_cookie_names_follow_secure_setting():
     try:
         object.__setattr__(settings, "cookie_secure", True)
         assert settings.session_cookie_name.startswith("__Host-")
-        assert settings.csrf_cookie_name.startswith("__Host-")
         assert settings.session_samesite == "strict"
         object.__setattr__(settings, "cookie_secure", False)
         assert settings.session_cookie_name == "albedo_session"
-        assert settings.csrf_cookie_name == "albedo_csrf"
         assert settings.session_samesite == "lax"
     finally:
         object.__setattr__(settings, "cookie_secure", original)
