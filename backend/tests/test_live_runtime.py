@@ -101,3 +101,39 @@ async def test_live_file_parser_rejects_escape() -> None:
         assert "M5a-2 文件解析验证" in parsed
     finally:
         sample.unlink(missing_ok=True)
+
+
+@pytest.mark.asyncio
+async def test_mcp_same_name_tools_get_prefixed(monkeypatch) -> None:
+    """多个 MCP 暴露同名工具时，工具名应加 server 前缀去重，避免 bind_tools 冲突。"""
+    from langchain_core.tools import StructuredTool
+
+    async def search(query: str = "") -> str:
+        return "ok"
+
+    def make_search() -> StructuredTool:
+        return StructuredTool.from_function(coroutine=search, name="search", description="检索")
+
+    async def fake_load(server: dict) -> list:
+        return [make_search()]
+
+    monkeypatch.setattr("app.runtime.tools.load_server_tools", fake_load)
+
+    snapshot = {
+        "resolvedMounts": {
+            "mcp": [
+                {"id": "mcp-aaa", "name": "服务A", "tools": [{"key": "search", "name": "search", "description": "检索", "enabled": True}]},
+                {"id": "mcp-bbb", "name": "服务B", "tools": [{"key": "search", "name": "search", "description": "检索", "enabled": True}]},
+            ],
+            "skill": [],
+            "tool": [],
+            "model": [],
+        }
+    }
+
+    tools, by_name = await build_tools(collect_tool_specs(snapshot), snapshot)
+
+    names = [tool.name for tool in tools]
+    assert names == ["mcp-aaa_search", "mcp-bbb_search"]
+    assert len(set(names)) == len(names) == 2
+    assert set(by_name) == {"mcp-aaa_search", "mcp-bbb_search"}

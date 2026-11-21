@@ -30,6 +30,17 @@ def safe_tool_name(index: int, name: str) -> str:
     return f"t{index}_{cleaned}"
 
 
+def mcp_tool_name(server_id: str, tool_key: str) -> str:
+    """生成带 server 前缀的 MCP 工具名，用于多个 MCP 同名工具去重。
+
+    langchain-mcp-adapters 默认不加前缀（tool_name_prefix=False），不同 MCP 的同名
+    工具会直接撞名，导致 bind_tools 下发重复 function 名、tools_by_name 互相覆盖。
+    """
+    prefix = _SAFE_NAME.sub("_", str(server_id)).strip("_")[:20] or "mcp"
+    suffix = _SAFE_NAME.sub("_", str(tool_key)).strip("_")[:40] or "tool"
+    return f"{prefix}_{suffix}"
+
+
 def collect_tool_specs(snapshot: dict) -> list[ToolSpec]:
     from app.core.config import get_settings
 
@@ -275,7 +286,8 @@ async def resolve_tool(
         for tool in loaded:
             # 精确匹配：后缀匹配会让被禁用的同名后缀工具（如 admin_delete）误绑定到已启用工具。
             if str(tool.name) == expected:
-                return tool
+                # 复制改名加 server 前缀去重，避免污染连接层共享缓存里的原名工具。
+                return tool.model_copy(update={"name": mcp_tool_name(str(server["id"]), expected)})
         return make_tool(tool_name, spec.description, error_runner(tool_name, "MCP 连接失败或该工具不可用"))
 
     if spec.kind == "skill":

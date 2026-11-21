@@ -39,6 +39,40 @@ class _Collector:
         self.model_spans: list[dict[str, Any]] = []
 
 
+def _invalid_call_id(call: dict, index: int) -> str:
+    """非法工具调用缺 id 时生成稳定占位，保证 tools 与 model 两阶段一致。"""
+    return str(call.get("id") or "") or f"call_invalid_{index}"
+
+
+def normalize_invalid_tool_calls(message: Any) -> Any:
+    """把模型输出的非法工具调用归一化为合法调用，避免非法 arguments 回传上游。
+
+    模型/兼容网关偶发返回 arguments 为空串等非法 JSON，LangChain 会将其标为
+    invalid_tool_calls 并保留原始字符串；langchain-openai 回传历史消息时对 invalid
+    调用不做 json.dumps 原样输出，导致上游报「Invalid request format」。这里把 args
+    归一化为 error 字典并清空 invalid_tool_calls，杜绝非法 arguments 触发 400。
+    """
+    if not isinstance(message, AIMessage):
+        return message
+    invalid = list(getattr(message, "invalid_tool_calls", []) or [])
+    if not invalid:
+        return message
+    fixed = [
+        {
+            "name": str(call.get("name") or "unknown"),
+            "args": {"status": "error", "message": "工具调用参数不是合法 JSON，未执行"},
+            "id": _invalid_call_id(call, index),
+        }
+        for index, call in enumerate(invalid)
+    ]
+    return message.model_copy(
+        update={
+            "tool_calls": list(getattr(message, "tool_calls", []) or []) + fixed,
+            "invalid_tool_calls": [],
+        }
+    )
+
+
 class RuntimeEngine:
     """M5a-2 LangGraph 运行引擎：prepare → model → tools → finalize。
 
@@ -478,7 +512,9 @@ class RuntimeEngine:
 
         async def model_node(state: AgentState) -> dict:
             started = time.perf_counter()
-            messages = [SystemMessage(content=state["system_prompt"])] + list(state["messages"])
+            messages = [SystemMessage(content=state["system_prompt"])] + [
+                normalize_invalid_tool_calls(message) for message in state["messages"]
+            ]
             if streaming:
                 reply = await self._stream_model(model, messages, max_retries)
             else:
@@ -498,6 +534,7 @@ class RuntimeEngine:
         async def tools_node(state: AgentState) -> dict:
             last = state["messages"][-1]
             calls = list(getattr(last, "tool_calls", []) or [])
+            invalid_calls = list(getattr(last, "invalid_tool_calls", []) or [])
             remaining = max(0, state["max_tool_calls"] - state["tool_call_count"])
             results: list[ToolMessage] = []
             loaded = list(state.get("loaded_skills") or [])
@@ -592,6 +629,16 @@ class RuntimeEngine:
                     content=str(output),
                     tool_call_id=str(call.get("id") or ""),
                     name=tool_name,
+                ))
+            for index, invalid in enumerate(invalid_calls):
+                # 非法工具调用无法执行，明确反馈给模型以便自纠，id 与回传时的归一化保持一致。
+                results.append(ToolMessage(
+                    content=json.dumps(
+                        {"status": "error", "message": "工具调用参数不是合法 JSON，未执行"},
+                        ensure_ascii=False,
+                    ),
+                    tool_call_id=_invalid_call_id(invalid, index),
+                    name=str(invalid.get("name") or "unknown"),
                 ))
             return {
                 "messages": results,
